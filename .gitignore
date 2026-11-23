@@ -1,0 +1,53 @@
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# OS & System
+.DS_Store
+Thumbs.db
+Desktop.ini
+*~
+
+# Editors & IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+.project
+.classpath
+.settings/
+
+# Logs & Temp
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.bak
+*.cache
+
+# Dependencies & Build Outputs (Node / Python / General)
+node_modules/
+dist/
+build/
+out/
+coverage/
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local Database & Storage
+*.sqlite
+*.sqlite3
+*.db
+data/local/
