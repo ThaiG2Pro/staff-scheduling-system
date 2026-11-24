@@ -6,7 +6,16 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { BarChart3, CalendarDays, PanelRightClose, PanelRightOpen, RotateCcw, X } from 'lucide-react';
+import {
+  BarChart3,
+  CalendarDays,
+  PanelRightClose,
+  PanelRightOpen,
+  Pin,
+  PinOff,
+  RotateCcw,
+  X,
+} from 'lucide-react';
 import type {
   Assignment,
   AutoScheduleResult,
@@ -195,6 +204,24 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
     ? schedule.staff.find((s) => s.id === highlightedStaffId)?.name ?? null
     : null;
 
+  const scopedAssignments = highlightedStaffId
+    ? schedule.assignments.filter((a) => a.staffId === highlightedStaffId)
+    : schedule.assignments;
+  const allScopedPinned =
+    scopedAssignments.length > 0 && scopedAssignments.every((a) => a.isPinned);
+
+  const handleBulkPinToggle = () => {
+    if (scopedAssignments.length === 0) return;
+    const nextPinned = !allScopedPinned;
+    const scopeLabel = highlightedStaffName ? `${highlightedStaffName}'s shifts` : 'all shifts';
+    pushUndo(`${nextPinned ? 'Pinned' : 'Unpinned'} ${scopeLabel}`);
+    store.setBulkPinAssignments(schedule.id, {
+      isPinned: nextPinned,
+      staffId: highlightedStaffId,
+    });
+    setConflictAssignmentIds(new Set());
+  };
+
   return (
     <div className="min-h-screen bg-[#E6ECF3] text-slate-900">
       <TopActionBar
@@ -267,8 +294,8 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
         {/* Responsive Split Workspace: stacks cleanly below lg, side-by-side on desktop */}
         <div className="flex min-h-0 flex-col items-start gap-4 lg:flex-row">
           <section className="w-full min-w-0 flex-1 overflow-hidden rounded-xl border border-slate-300/80 bg-white shadow-xs">
-            {/* Sub-header Tabs & Roster Legend */}
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/80 px-4 py-2.5">
+            {/* Sub-header Tabs & Primary View Controls (Actions only — zero wrap jitter) */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50/80 px-4 py-2">
               <div
                 className="inline-flex items-center gap-1 rounded-lg bg-slate-200/80 p-0.5"
                 role="tablist"
@@ -305,28 +332,7 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
               </div>
 
               {activeTab === 'roster' ? (
-                <div className="flex flex-wrap items-center justify-end gap-x-3.5 gap-y-1.5 text-[11px] font-medium text-slate-700">
-                  <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-                    <span className="h-3.5 w-1.5 rounded-full bg-emerald-600" aria-hidden="true" />
-                    Scheduled
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-                    <span className="h-3.5 w-1.5 rounded-full bg-indigo-600" aria-hidden="true" />
-                    Pinned
-                  </span>
-                  <span
-                    title="Staff assigned 2+ shifts or overlapping hours on the same day"
-                    className="inline-flex cursor-help items-center gap-1.5 whitespace-nowrap"
-                  >
-                    <span className="h-3.5 w-1.5 rounded-full bg-amber-600" aria-hidden="true" />
-                    Double-booked
-                  </span>
-                  <span className="inline-flex items-center gap-1 whitespace-nowrap">
-                    <span className="rounded border border-rose-300 bg-rose-100 px-1 py-0.2 text-[9px] font-bold text-rose-800">
-                      OT
-                    </span>
-                    Over weekly cap
-                  </span>
+                <div className="flex flex-wrap items-center justify-end gap-2 text-[11px] font-medium text-slate-700">
                   {highlightedStaffName && (
                     <span className="inline-flex items-center gap-1 rounded-full border border-indigo-300 bg-indigo-100 px-2.5 py-0.5 font-semibold text-indigo-900">
                       Showing {highlightedStaffName}
@@ -340,11 +346,46 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
                       </button>
                     </span>
                   )}
+                  {scopedAssignments.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleBulkPinToggle}
+                      title={
+                        highlightedStaffName
+                          ? `${allScopedPinned ? 'Unpin' : 'Pin'} all ${scopedAssignments.length} shift(s) for ${highlightedStaffName}`
+                          : `${allScopedPinned ? 'Unpin' : 'Pin'} all ${scopedAssignments.length} shifts in this schedule`
+                      }
+                      className={`inline-flex min-w-[88px] items-center justify-center gap-1 whitespace-nowrap rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition ${
+                        highlightedStaffName
+                          ? 'border-indigo-300 bg-indigo-50 text-indigo-900 hover:bg-indigo-100'
+                          : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
+                      {allScopedPinned ? (
+                        <>
+                          <PinOff className="h-3.5 w-3.5 text-slate-600" aria-hidden="true" />
+                          {highlightedStaffName
+                            ? `Unpin (${scopedAssignments.length})`
+                            : 'Unpin all'}
+                        </>
+                      ) : (
+                        <>
+                          <Pin
+                            className="h-3.5 w-3.5 fill-indigo-600 text-indigo-600"
+                            aria-hidden="true"
+                          />
+                          {highlightedStaffName
+                            ? `Pin all (${scopedAssignments.length})`
+                            : 'Pin all'}
+                        </>
+                      )}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setTeamPanelOpen((prev) => !prev)}
                     title={teamPanelOpen ? 'Hide Team panel to expand roster' : 'Show Team panel'}
-                    className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                    className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
                   >
                     {teamPanelOpen ? (
                       <>
@@ -369,6 +410,34 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
                 </div>
               )}
             </div>
+
+            {/* Dedicated slim Roster Legend Bar — never wraps or jumps when buttons toggle */}
+            {activeTab === 'roster' && (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-200 bg-white px-4 py-1.5 text-[11px] font-medium text-slate-600">
+                <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                  <span className="h-3 w-1.5 rounded-full bg-emerald-600" aria-hidden="true" />
+                  Healthy
+                </span>
+                <span
+                  title="Staff assigned 2+ shifts on the same day or exceeding weekly hour limit"
+                  className="inline-flex cursor-help items-center gap-1.5 whitespace-nowrap"
+                >
+                  <span className="h-3 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+                  2+ shifts / OT
+                </span>
+                <span
+                  title="Overlapping shifts or conflicting pinned shifts blocking Auto-schedule"
+                  className="inline-flex cursor-help items-center gap-1.5 whitespace-nowrap"
+                >
+                  <span className="h-3 w-1.5 rounded-full bg-rose-600" aria-hidden="true" />
+                  Overlap / Conflict
+                </span>
+                <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                  <Pin className="h-3 w-3 fill-indigo-600 text-indigo-600" aria-hidden="true" />
+                  Pinned
+                </span>
+              </div>
+            )}
 
             {/* Active Tab Content */}
             {viewModel && activeTab === 'roster' && (

@@ -36,6 +36,7 @@ import {
   assignStaffToShift,
   reassignStaff,
   restoreAssignmentsSnapshot,
+  setBulkPinAssignments,
   togglePinAssignment,
   unassignStaff,
 } from './assignmentActions';
@@ -98,6 +99,10 @@ export interface ScheduleStore {
   unassignStaff: (scheduleId: string, assignmentId: string) => StateActionResult;
   reassignStaff: (scheduleId: string, assignmentId: string, newStaffId: string) => StateActionResult<{ assignmentId: string }>;
   togglePinAssignment: (scheduleId: string, assignmentId: string) => StateActionResult<{ isPinned: boolean }>;
+  setBulkPinAssignments: (
+    scheduleId: string,
+    input: { isPinned: boolean; staffId?: string | null },
+  ) => StateActionResult<{ affectedCount: number }>;
   restoreAssignments: (scheduleId: string, snapshot: readonly Assignment[]) => StateActionResult;
   importCsvToSchedule: (scheduleId: string, csvText: string, sourceFileName?: string) => CsvImportActionResult;
   runAutoScheduleForSchedule: (scheduleId: string) => AutoScheduleActionResult;
@@ -274,6 +279,8 @@ export function useScheduleStore(
       runWritable((cur) => reassignStaff(cur, scheduleId, assignmentId, newStaffId, deps), () => scheduleId),
     togglePinAssignment: (scheduleId, assignmentId) =>
       runWritable((cur) => togglePinAssignment(cur, scheduleId, assignmentId, deps), () => scheduleId),
+    setBulkPinAssignments: (scheduleId, input) =>
+      runWritable((cur) => setBulkPinAssignments(cur, scheduleId, input, deps), () => scheduleId),
     restoreAssignments: (scheduleId, snapshot) =>
       runWritable((cur) => restoreAssignmentsSnapshot(cur, scheduleId, snapshot, deps), () => scheduleId),
     importCsvToSchedule: (scheduleId, csvText, sourceFileName) => {

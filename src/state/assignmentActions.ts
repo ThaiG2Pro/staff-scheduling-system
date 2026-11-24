@@ -213,3 +213,44 @@ export function restoreAssignmentsSnapshot(
     changed: true,
   };
 }
+
+/**
+ * Sets `isPinned` atomically across all assignments (or only those matching `staffId`).
+ * Preserves `updatedAt` as a no-op if no targeted assignment actually changes state.
+ */
+export function setBulkPinAssignments(
+  state: Readonly<PersistedAppState>,
+  scheduleId: string,
+  input: { isPinned: boolean; staffId?: string | null },
+  deps: ActionDeps = DEFAULT_ACTION_DEPS,
+): StateActionResult<{ affectedCount: number }> {
+  const schedule = findSchedule(state, scheduleId);
+  if (!schedule) return { ok: false, error: 'Schedule not found.' };
+
+  let affectedCount = 0;
+  const nextAssignments = schedule.assignments.map((a) => {
+    const matchesScope = !input.staffId || a.staffId === input.staffId;
+    if (!matchesScope || a.isPinned === input.isPinned) {
+      return a;
+    }
+    affectedCount++;
+    return { ...a, isPinned: input.isPinned };
+  });
+
+  if (affectedCount === 0) {
+    return { ok: true, state, changed: false, affectedCount: 0 };
+  }
+
+  const updated: Schedule = {
+    ...schedule,
+    updatedAt: deps.nowIso(),
+    assignments: nextAssignments,
+  };
+
+  return {
+    ok: true,
+    state: replaceSchedule(state, updated),
+    changed: true,
+    affectedCount,
+  };
+}

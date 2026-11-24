@@ -1,8 +1,9 @@
 /**
- * @file Zero-width-bloat roster assignment chip (`AC-04`) styled with healthy emerald
- * cards for valid assignments, indigo for pinned shifts, sky for AI-new drafts, and
- * self-explanatory 2-line problem sub-badges (`Overlap`, `2+ shifts`, `OT`, `Pin conflict`)
- * with floating hover/focus Pin & Remove actions so columns never expand.
+ * @file Roster assignment card (`AC-04`) using a unified health-driven color model where
+ * the left accent bar always matches the card tone:
+ * - Emerald: Healthy shift (including pinned shifts, indicated by the Pin icon)
+ * - Amber: Operational warning (`2+ shifts` same day or `OT` weekly cap)
+ * - Rose: Critical conflict (`Overlap` or `Pin conflict` blocking Auto-schedule)
  */
 
 import { AlertTriangle, Pin, ShieldAlert, X } from 'lucide-react';
@@ -22,9 +23,9 @@ export interface AssignmentChipProps {
 }
 
 /**
- * Interactive shift assignment card designed for fixed-column 7-day grids.
- * Healthy shifts render as a clean 1-line emerald card; shifts with issues automatically
- * surface a concise 2nd status line so Store Managers diagnose conflicts without hovering.
+ * Interactive shift assignment card for fixed-column 7-day grids.
+ * Card surface and left accent bar share the same semantic health color; Pin is
+ * represented orthogonally via the always-visible Pin icon so color means health only.
  *
  * @param props - Assignment record, staff display name, warning/highlight states, and handlers.
  * @returns Styled assignment card.
@@ -45,7 +46,10 @@ export function AssignmentChip({
   const isMultiShiftDay = Boolean(warningFlags?.isMultiShiftDay);
   const hasLocalWarning = isOverlapping || isMultiShiftDay;
   const isOvertime = Boolean(warningFlags?.isOverMaxHours);
-  const hasAnyIssue = isPinConflict || hasLocalWarning || isOvertime;
+
+  const isCritical = isPinConflict || isOverlapping;
+  const isWarning = !isCritical && (isMultiShiftDay || isOvertime);
+  const hasAnyIssue = isCritical || isWarning;
 
   const localWarningLabel = [
     isOverlapping ? 'Overlapping shifts' : null,
@@ -57,22 +61,14 @@ export function AssignmentChip({
   let surfaceClasses = 'bg-emerald-50 border-emerald-300/90 border-l-emerald-600 text-emerald-950';
   let overlayBg = 'bg-emerald-50/95';
 
-  if (isPinConflict) {
-    surfaceClasses =
-      'bg-rose-50 border-rose-400 border-l-rose-600 text-rose-950 ring-2 ring-rose-500/70';
+  if (isCritical) {
+    surfaceClasses = isPinConflict
+      ? 'bg-rose-50 border-rose-400 border-l-rose-600 text-rose-950 ring-2 ring-rose-500/70'
+      : 'bg-rose-50 border-rose-300 border-l-rose-600 text-rose-950';
     overlayBg = 'bg-rose-50/95';
-  } else if (hasLocalWarning) {
-    surfaceClasses = 'bg-amber-50 border-amber-300 border-l-amber-600 text-amber-950';
+  } else if (isWarning) {
+    surfaceClasses = 'bg-amber-50 border-amber-300 border-l-amber-500 text-amber-950';
     overlayBg = 'bg-amber-50/95';
-  } else if (isOvertime) {
-    surfaceClasses = 'bg-rose-50/90 border-rose-300 border-l-rose-600 text-rose-950';
-    overlayBg = 'bg-rose-50/95';
-  } else if (assignment.isPinned) {
-    surfaceClasses = 'bg-indigo-50 border-indigo-300 border-l-indigo-600 text-indigo-950';
-    overlayBg = 'bg-indigo-50/95';
-  } else if (isNewFromAuto) {
-    surfaceClasses = 'bg-sky-50 border-sky-300 border-l-sky-600 text-slate-900';
-    overlayBg = 'bg-sky-50/95';
   }
 
   return (
@@ -101,7 +97,7 @@ export function AssignmentChip({
 
         {assignment.isPinned && (
           <Pin
-            className="h-3 w-3 shrink-0 text-indigo-700 group-hover:opacity-0"
+            className="h-3 w-3 shrink-0 fill-indigo-600 text-indigo-600 group-hover:opacity-0"
             aria-hidden="true"
           />
         )}
@@ -121,9 +117,18 @@ export function AssignmentChip({
             <span
               title={localWarningLabel}
               aria-label={localWarningLabel}
-              className="inline-flex items-center gap-0.5 rounded bg-amber-200/75 px-1.5 py-0.2 text-[10px] font-bold text-amber-950"
+              className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.2 text-[10px] font-bold ${
+                isOverlapping
+                  ? 'bg-rose-200/80 text-rose-900'
+                  : 'bg-amber-200/75 text-amber-950'
+              }`}
             >
-              <AlertTriangle className="h-2.5 w-2.5 shrink-0 text-amber-800" aria-hidden="true" />
+              <AlertTriangle
+                className={`h-2.5 w-2.5 shrink-0 ${
+                  isOverlapping ? 'text-rose-800' : 'text-amber-800'
+                }`}
+                aria-hidden="true"
+              />
               {isOverlapping ? 'Overlap' : '2+ shifts'}
             </span>
           )}
@@ -131,7 +136,7 @@ export function AssignmentChip({
           {isOvertime && (
             <span
               title="Over weekly hour limit"
-              className="inline-flex items-center rounded border border-rose-300 bg-rose-100 px-1.5 py-0.2 text-[10px] font-bold text-rose-800"
+              className="inline-flex items-center rounded border border-amber-300 bg-amber-100 px-1.5 py-0.2 text-[10px] font-bold text-amber-900"
             >
               {hasLocalWarning || isPinConflict ? 'OT' : 'OT · Over cap'}
             </span>
@@ -151,11 +156,14 @@ export function AssignmentChip({
           title={assignment.isPinned ? 'Pinned (click to unpin)' : 'Pin shift'}
           className={`rounded p-0.5 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 ${
             assignment.isPinned
-              ? 'text-indigo-700 hover:bg-indigo-100'
+              ? 'text-indigo-600 hover:bg-indigo-100'
               : 'text-slate-700 hover:bg-black/10 hover:text-slate-950'
           }`}
         >
-          <Pin className="h-3 w-3" aria-hidden="true" />
+          <Pin
+            className={`h-3 w-3 ${assignment.isPinned ? 'fill-indigo-600' : ''}`}
+            aria-hidden="true"
+          />
         </button>
 
         <button

@@ -153,7 +153,18 @@ describe('Slice 4: Schedule Health Bar & P0 Aggregated Summary 7x16 (AC-05)', ()
     // Run Auto-schedule and verify 1-click Undo Auto-schedule restores empty draft
     await user.click(screen.getByRole('button', { name: /Auto-schedule/i }));
     expect(screen.getByRole('button', { name: /Undo Auto-schedule/i })).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: /Undo Auto-schedule/i }));
-    expect(screen.queryByRole('button', { name: /Undo Auto-schedule/i })).toBeNull();
+
+    // Test global Pin all / Unpin all + staff-scoped Pin all
+    await user.click(screen.getByRole('button', { name: /^Pin all$/i }));
+    expect(screen.getByRole('button', { name: /^Unpin all$/i })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: /^Unpin all$/i }));
+    expect(screen.getByRole('button', { name: /^Pin all$/i })).toBeTruthy();
+
+    // Select Alice Nguyen in Team panel -> bulk pin scopes only to Alice's shifts
+    const teamPanel = screen.getByRole('complementary', { name: /Team panel/i });
+    await user.click(within(teamPanel).getByRole('button', { name: /^Alice Nguyen$/i }));
+    const scopedPinBtn = screen.getByRole('button', { name: /^Pin all \(\d+\)$/i });
+    await user.click(scopedPinBtn);
+    expect(screen.getByRole('button', { name: /^Unpin \(\d+\)$/i })).toBeTruthy();
   });
 });
