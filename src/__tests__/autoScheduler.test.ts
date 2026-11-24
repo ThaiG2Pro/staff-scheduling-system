@@ -478,4 +478,83 @@ describe('autoScheduler (T-09, T-10, T-11, T-12, T-13, AC-03)', () => {
       expect(crossDayRes.diagnostics.fairnessJainIndex).toBeCloseTo(1.0, 9);
     }
   });
+
+  it('QA-E4: blocks 2 non-overlapping pins on same day with MULTIPLE_SHIFTS_SAME_DAY only (not OVERLAPPING_SHIFTS)', () => {
+    const grid = createZeroGrid();
+    grid[0][7] = 15;
+
+    const res = runAutoSchedule({
+      demand: makeDemand(grid),
+      staff: [{ id: 's1', name: 'Alice', maxWeeklyHours: 40 }],
+      shifts: [
+        { id: 'morning', startHour: 7, endHour: 15 },
+        { id: 'evening', startHour: 15, endHour: 23 },
+      ],
+      existingAssignments: [
+        { id: 'pin-m', day: 0, shiftId: 'morning', staffId: 's1', isPinned: true },
+        { id: 'pin-e', day: 0, shiftId: 'evening', staffId: 's1', isPinned: true },
+      ],
+      targetTxnsPerStaffHour: 15,
+      idGenerator: makeSeqIdGen('pin-nonovl'),
+    });
+
+    expect(res.status).toBe('BLOCKED_PIN_CONFLICT');
+    if (res.status === 'BLOCKED_PIN_CONFLICT') {
+      expect(res.conflicts.some((c) => c.type === 'MULTIPLE_SHIFTS_SAME_DAY')).toBe(true);
+      expect(res.conflicts.some((c) => c.type === 'OVERLAPPING_SHIFTS')).toBe(false);
+    }
+  });
+
+  it('QA-E5: keeps pinned assignments strictly immutable during Stage 2 rebalance even when unpinning would improve Jain Index', () => {
+    const grid = createZeroGrid();
+    // 3 days need 1 morning shift (8h) each
+    for (let d = 0; d < 3; d++) {
+      for (let h = 7; h < 15; h++) {
+        grid[d as 0 | 1 | 2][h as OperatingHour] = 15;
+      }
+    }
+
+    const shifts: ShiftTemplate[] = [{ id: 'morning', startHour: 7, endHour: 15 }];
+    // Alice has 2 pinned shifts (16h / 24h); Bob has 0 pinned shifts (0h / 24h).
+    // Day 2 unpinned shift must go to Bob (or rebalance to Bob) so Alice=16h, Bob=8h;
+    // Stage 2 must NEVER move either of Alice's pinned shifts!
+    const pinned1: Assignment = {
+      id: 'pin-d0',
+      day: 0,
+      shiftId: 'morning',
+      staffId: 'alice',
+      isPinned: true,
+    };
+    const pinned2: Assignment = {
+      id: 'pin-d1',
+      day: 1,
+      shiftId: 'morning',
+      staffId: 'alice',
+      isPinned: true,
+    };
+
+    const res = runAutoSchedule({
+      demand: makeDemand(grid),
+      staff: [
+        { id: 'alice', name: 'Alice', maxWeeklyHours: 24 },
+        { id: 'bob', name: 'Bob', maxWeeklyHours: 24 },
+      ],
+      shifts,
+      existingAssignments: [pinned1, pinned2],
+      targetTxnsPerStaffHour: 15,
+      idGenerator: makeSeqIdGen('pin-reb'),
+    });
+
+    expect(res.status).toBe('SUCCESS');
+    if (res.status !== 'SUCCESS') return;
+
+    expect(res.assignments).toContainEqual(pinned1);
+    expect(res.assignments).toContainEqual(pinned2);
+    expect(res.diagnostics.preservedPinnedCount).toBe(2);
+    expect(res.diagnostics.demandCoverage).toBe(1);
+    // Day 2 shift should end up on Bob for better fairness (16h vs 8h instead of 24h vs 0h)
+    const day2Assign = res.assignments.find((a) => a.day === 2);
+    expect(day2Assign?.staffId).toBe('bob');
+    expect(day2Assign?.isPinned).toBe(false);
+  });
 });

@@ -300,4 +300,39 @@ describe('derivedMetrics & constraints (T-06, T-07, T-08, AC-01, AC-03)', () => 
       ).ok,
     ).toBe(false);
   });
+
+  it('QA-E3: handles 2 non-overlapping manual shifts on same day with over-max hours (no false overlap warning)', () => {
+    const schedule: Schedule = {
+      id: 'sched-nonoverlap-multi',
+      name: 'Non-overlapping Multi-shift Test',
+      createdAt: '2026-08-07T00:00:00.000Z',
+      updatedAt: '2026-08-07T00:00:00.000Z',
+      targetTxnsPerStaffHour: 15,
+      staff: [{ id: 'alice', name: 'Alice', maxWeeklyHours: 12 }],
+      shifts: [
+        { id: 'morning', startHour: 7, endHour: 15 }, // 8h
+        { id: 'evening', startHour: 15, endHour: 23 }, // 8h (back-to-back, no overlap)
+      ],
+      demand: null,
+      assignments: [
+        { id: 'a1', day: 0, shiftId: 'morning', staffId: 'alice', isPinned: false },
+        { id: 'a2', day: 0, shiftId: 'evening', staffId: 'alice', isPinned: false },
+      ],
+    };
+
+    const res = deriveScheduleViewModel(schedule);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    const aliceMetrics = res.viewModel.staffMetrics['alice'];
+    expect(aliceMetrics?.assignedHours).toBe(16);
+    expect(aliceMetrics?.isOverMaxHours).toBe(true); // 16 > 12
+    expect(aliceMetrics?.overlappingAssignmentIds).toEqual([]);
+    expect(aliceMetrics?.multiShiftDays).toEqual([0]);
+
+    expect(res.viewModel.health.hourLimitWarningCount).toBe(1);
+    expect(res.viewModel.assignmentWarnings['a1']?.isOverlapping).toBe(false);
+    expect(res.viewModel.assignmentWarnings['a1']?.isMultiShiftDay).toBe(true);
+    expect(res.viewModel.assignmentWarnings['a1']?.isOverMaxHours).toBe(true);
+  });
 });

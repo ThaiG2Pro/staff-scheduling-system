@@ -84,4 +84,10 @@ describe('decimalMath (T-01, T-02, AC-03)', () => {
     });
     expect(sumSafeIntegers([10, 20, 30])).toEqual({ ok: true, value: 60 });
   });
+
+  it('QA-E1: rejects scientific notation, Infinity, negative, and malformed decimal strings in validateTargetNInput', () => {
+    for (const raw of ['1e1', '1.5e2', 'Infinity', '-15', '15.', '.5', '+15', 'NaN']) {
+      expect(validateTargetNInput(raw).ok).toBe(false);
+    }
+  });
 });

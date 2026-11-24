@@ -219,4 +219,40 @@ describe('csvParser (T-03, T-04, T-05, AC-02)', () => {
     ].join('\n');
     expect(parseCsvTransactions(badIsoWd).ok).toBe(false);
   });
+
+  it('QA-E2: rejects decimal/empty/scientific transaction cells and parses year-rollover calendar weeks (Dec -> Jan)', () => {
+    // 1. Decimal transaction count rejected
+    const decimalRows = makeHourlyRows(() => [1, 1, 1, 1, 1, 1, 1]);
+    decimalRows[0] = '7am,12.5,1,1,1,1,1,1';
+    expect(
+      parseCsvTransactions([',Mon,Tue,Wed,Thu,Fri,Sat,Sun', ...decimalRows].join('\n')).ok,
+    ).toBe(false);
+
+    // 2. Empty transaction cell rejected (must NOT coerce "" -> 0)
+    const emptyCellRows = makeHourlyRows(() => [1, 1, 1, 1, 1, 1, 1]);
+    emptyCellRows[0] = '7am,,1,1,1,1,1,1';
+    expect(
+      parseCsvTransactions([',Mon,Tue,Wed,Thu,Fri,Sat,Sun', ...emptyCellRows].join('\n')).ok,
+    ).toBe(false);
+
+    // 3. Scientific notation transaction cell rejected
+    const sciCellRows = makeHourlyRows(() => [1, 1, 1, 1, 1, 1, 1]);
+    sciCellRows[0] = '7am,1e2,1,1,1,1,1,1';
+    expect(
+      parseCsvTransactions([',Mon,Tue,Wed,Thu,Fri,Sat,Sun', ...sciCellRows].join('\n')).ok,
+    ).toBe(false);
+
+    // 4. Year rollover week: Tue 29 Dec 2026 .. Mon 04 Jan 2027 (7 consecutive days across year boundary)
+    const rolloverCsv = [
+      ',2026-12-29,2026-12-30,2026-12-31,2027-01-01,2027-01-02,2027-01-03,2027-01-04',
+      ...makeHourlyRows(() => [2, 3, 4, 5, 6, 7, 1]),
+    ].join('\n');
+    const rolloverRes = parseCsvTransactions(rolloverCsv);
+    expect(rolloverRes.ok).toBe(true);
+    if (!rolloverRes.ok) return;
+    // 2027-01-04 is Monday (DayOfWeek 0) -> value 1; 2026-12-29 is Tuesday (DayOfWeek 1) -> value 2
+    expect(rolloverRes.transactions[0][7]).toBe(1);
+    expect(rolloverRes.transactions[1][7]).toBe(2);
+    expect(rolloverRes.transactions[4][7]).toBe(5); // Fri 2027-01-01
+  });
 });
