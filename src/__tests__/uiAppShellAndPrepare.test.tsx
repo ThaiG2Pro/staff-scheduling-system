@@ -238,7 +238,7 @@ describe('Slice 3: Prepare Flows, Target N Round-trip & CSV Import (AC-01, AC-02
     expect(autoBtn).toHaveProperty('disabled', true);
 
     // Add a staff member via StaffFormModal (strictly 2 fields)
-    await user.click(screen.getByRole('button', { name: /Add Staff/i }));
+    await user.click(screen.getByRole('button', { name: /^Add Staff$/i }));
     const staffDialog = screen.getByRole('dialog');
     await user.type(within(staffDialog).getByLabelText(/Staff Name/i), 'Maya Lin');
     const hoursInput = within(staffDialog).getByLabelText(/Max Weekly Hours/i);
@@ -258,7 +258,7 @@ describe('Slice 3: Prepare Flows, Target N Round-trip & CSV Import (AC-01, AC-02
     await user.click(within(shiftsDialog).getByRole('button', { name: /^Done$/i }));
 
     // Import valid CSV via CsvImportModal
-    await user.click(screen.getByRole('button', { name: /Import CSV/i }));
+    await user.click(screen.getByRole('button', { name: /^Import CSV$/i }));
     const csvDialog = screen.getByRole('dialog');
     const textarea = within(csvDialog).getByLabelText(/Or paste CSV content/i);
     fireEvent.change(textarea, { target: { value: DEMO_STORE_CSV_TEXT } });
@@ -281,7 +281,7 @@ describe('Slice 3: Prepare Flows, Target N Round-trip & CSV Import (AC-01, AC-02
 
     // Run Auto-schedule so Maya Lin gets assigned shifts, then verify Delete Staff cascade count (E-08)
     await user.click(screen.getByRole('button', { name: /Auto-schedule/i }));
-    expect(screen.getByText(/Auto-schedule completed/i)).toBeTruthy();
+    expect(screen.getByText(/Auto-schedule draft ready/i)).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: /Delete Maya Lin/i }));
     const deleteDialog = screen.getByRole('dialog');

@@ -1,30 +1,24 @@
 /**
- * @file Schedule Workspace App Shell (`activeScheduleId !== null`) composing `TopActionBar`,
- * `RecoveryBanner`, contextual feedback banners, Tabbed Core View (`Weekly Roster` | `Hourly Summary`),
- * sticky `StaffPanel`, and all Prepare Flow modals (`StaffFormModal`, `ManageShiftsModal`,
- * `CsvImportModal`, `ConfirmDialog`).
+ * @file Schedule Workspace Screen (`activeScheduleId !== null`) composing `TopActionBar`,
+ * `ScheduleHealthBar`, `RecoveryBanner`, `ContextualBanners`, Tabbed Core View
+ * (`WeeklyRosterGrid` | `AggregatedSummaryView`), sticky `StaffPanel`, and Prepare Modals.
  */
 
 import { useState } from 'react';
-import {
-  AlertTriangle,
-  BarChart3,
-  CalendarDays,
-  CheckCircle2,
-  Clock,
-  FileSpreadsheet,
-  Users,
-  X,
-} from 'lucide-react';
-import type { AutoScheduleResult, Schedule, Staff } from '../../domain/types';
+import { BarChart3, CalendarDays } from 'lucide-react';
+import type { AutoScheduleResult, DayOfWeek, OperatingHour, Schedule, Staff } from '../../domain/types';
 import type { ScheduleStore } from '../../state/useScheduleStore';
 import { ConfirmDialog } from '../common/ConfirmDialog';
-import { formatShiftRange, formatTimestamp } from '../common/formatters';
+import { formatTimestamp } from '../common/formatters';
 import { CsvImportModal } from '../panels/CsvImportModal';
 import { ManageShiftsModal } from '../panels/ManageShiftsModal';
 import { StaffFormModal } from '../panels/StaffFormModal';
 import { StaffPanel } from '../panels/StaffPanel';
+import { WeeklyRosterGrid, type FocusedRosterSlot } from '../roster/WeeklyRosterGrid';
+import { AggregatedSummaryView } from '../summary/AggregatedSummaryView';
+import { ContextualBanners, type WorkspaceBannerState } from '../workspace/ContextualBanners';
 import { RecoveryBanner } from '../workspace/RecoveryBanner';
+import { ScheduleHealthBar } from '../workspace/ScheduleHealthBar';
 import { TopActionBar } from '../workspace/TopActionBar';
 
 export type WorkspaceTab = 'roster' | 'summary';
@@ -34,15 +28,10 @@ export interface ScheduleWorkspaceScreenProps {
   schedule: Schedule;
 }
 
-interface FeedbackNotice {
-  tone: 'success' | 'warning' | 'error';
-  title: string;
-  details?: string[];
-}
-
 /**
- * Main workspace screen for editing and optimizing a single weekly store schedule.
- * Hosts all Slice 3 Prepare Flows and provides clean tab slots for Slice 4's Roster & Summary grids.
+ * Full interactive workspace for a single weekly store schedule.
+ * Connects live derived metrics (`ScheduleHealthBar`, `AggregatedSummaryView`) with
+ * direct roster editing (`WeeklyRosterGrid` + `AssignmentGuidancePopover`) and Prepare Flows.
  *
  * @param props - Active `ScheduleStore` and resolved active `Schedule`.
  * @returns Workspace layout.
@@ -50,7 +39,16 @@ interface FeedbackNotice {
 export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceScreenProps) {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('roster');
   const [highlightedStaffId, setHighlightedStaffId] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<FeedbackNotice | null>(null);
+  const [highlightedOverLimitOnly, setHighlightedOverLimitOnly] = useState(false);
+  const [focusedSlot, setFocusedSlot] = useState<FocusedRosterSlot | null>(null);
+
+  const [banner, setBanner] = useState<WorkspaceBannerState | null>(null);
+  const [conflictAssignmentIds, setConflictAssignmentIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [newAutoAssignmentIds, setNewAutoAssignmentIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
 
   const [csvModalOpen, setCsvModalOpen] = useState(false);
   const [shiftsModalOpen, setShiftsModalOpen] = useState(false);
@@ -70,32 +68,47 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
   const viewModel = vmResult && vmResult.ok ? vmResult.viewModel : null;
 
   const handleRunAutoSchedule = () => {
+    const beforeIds = new Set(schedule.assignments.map((a) => a.id));
+    const beforeCov =
+      viewModel?.health.demandCoverage?.ratio !== null &&
+      viewModel?.health.demandCoverage?.ratio !== undefined
+        ? Math.round(viewModel.health.demandCoverage.ratio * 100)
+        : null;
+    const beforeGaps = viewModel?.health.staffingGapCount ?? null;
+
     const actionRes = store.runAutoScheduleForSchedule(schedule.id);
     const result: AutoScheduleResult = actionRes.result;
 
     if (result.status === 'SUCCESS') {
-      const covPct =
+      const addedIds = new Set(
+        result.assignments.filter((a) => !beforeIds.has(a.id)).map((a) => a.id),
+      );
+      const afterCov =
         result.diagnostics.demandCoverage !== null
-          ? `${Math.round(result.diagnostics.demandCoverage * 100)}%`
-          : '–';
-      setFeedback({
-        tone: 'success',
-        title: `Auto-schedule completed: ${result.diagnostics.generatedAssignmentsCount} new shift(s) assigned, ${result.diagnostics.preservedPinnedCount} pinned preserved (Demand Coverage ${covPct}).`,
-        details: result.diagnostics.summaryMessages,
+          ? Math.round(result.diagnostics.demandCoverage * 100)
+          : null;
+
+      setConflictAssignmentIds(new Set());
+      setNewAutoAssignmentIds(addedIds);
+      setActiveTab('roster');
+      setBanner({
+        kind: 'auto_review',
+        beforeCoveragePct: beforeCov,
+        afterCoveragePct: afterCov,
+        beforeGaps,
+        afterGaps: result.diagnostics.shortageHours === 0 ? 0 : null,
+        diagnostics: result.diagnostics,
       });
       return;
     }
 
     if (result.status === 'BLOCKED_PIN_CONFLICT') {
-      setFeedback({
-        tone: 'error',
-        title: 'Auto-schedule blocked due to conflicting pinned shifts.',
-        details: result.conflicts.map((c) => `${c.staffName}: ${c.details}`),
-      });
+      setBanner({ kind: 'pin_conflict', conflicts: result.conflicts });
       return;
     }
 
-    setFeedback({
+    setBanner({
+      kind: 'notice',
       tone: 'warning',
       title: result.message,
     });
@@ -104,6 +117,11 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
   const handleRequestDeleteStaff = (member: Staff) => {
     const preview = store.previewDeleteStaff(schedule.id, member.id);
     setDeleteStaffTarget({ staff: member, affectedCount: preview.affectedAssignmentsCount });
+  };
+
+  const handleJumpToRosterCell = (day: DayOfWeek, hour: OperatingHour) => {
+    setFocusedSlot({ day, hour });
+    setActiveTab('roster');
   };
 
   return (
@@ -122,7 +140,7 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
         onRequestDeleteSchedule={() => setDeleteScheduleOpen(true)}
       />
 
-      <main className="space-y-4 px-5 py-4">
+      <main className="space-y-3.5 px-5 py-4">
         <RecoveryBanner
           storageMode={store.storageMode}
           saveStatus={store.saveStatus}
@@ -141,52 +159,43 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
           </div>
         )}
 
-        {feedback && (
-          <div
-            role={feedback.tone === 'error' ? 'alert' : 'status'}
-            className={`rounded-xl border px-4 py-3 text-sm shadow-xs ${
-              feedback.tone === 'success'
-                ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
-                : feedback.tone === 'warning'
-                  ? 'border-amber-300 bg-amber-50 text-amber-950'
-                  : 'border-rose-300 bg-rose-50 text-rose-900'
-            }`}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-start gap-2.5">
-                {feedback.tone === 'success' ? (
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" aria-hidden="true" />
-                ) : (
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                )}
-                <div className="space-y-1">
-                  <p className="font-medium">{feedback.title}</p>
-                  {feedback.details && feedback.details.length > 0 && (
-                    <ul className="list-disc pl-4 text-xs opacity-90">
-                      {feedback.details.map((line, idx) => (
-                        <li key={idx}>{line}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setFeedback(null)}
-                aria-label="Dismiss notification"
-                className="rounded-md p-1 opacity-75 hover:bg-black/5 hover:opacity-100"
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-              </button>
-            </div>
-          </div>
+        {viewModel && (
+          <ScheduleHealthBar
+            health={viewModel.health}
+            onInspectGapsOrCoverage={() => setActiveTab('summary')}
+            onInspectHourLimitWarnings={() => {
+              setHighlightedStaffId(null);
+              setHighlightedOverLimitOnly((prev) => !prev);
+              setActiveTab('roster');
+            }}
+          />
         )}
+
+        <ContextualBanners
+          banner={
+            banner?.kind === 'auto_review' && viewModel
+              ? { ...banner, afterGaps: viewModel.health.staffingGapCount }
+              : banner
+          }
+          onHighlightPinConflicts={(ids) => {
+            setConflictAssignmentIds(new Set(ids));
+            setActiveTab('roster');
+          }}
+          onKeepDraft={() => {
+            setNewAutoAssignmentIds(new Set());
+            setBanner(null);
+          }}
+          onDismiss={() => {
+            setConflictAssignmentIds(new Set());
+            setBanner(null);
+          }}
+        />
 
         {/* Main Split Workspace: Left ~75% Tabbed Core View, Right ~25% Sticky Team Panel */}
         <div className="flex min-h-0 items-start gap-4">
           <section className="min-w-0 flex-1 rounded-xl border border-slate-300/80 bg-white shadow-xs">
             {/* Tab Bar */}
-            <div className="flex items-center justify-between border-b border-slate-200 px-4 pt-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 pt-2.5">
               <div className="flex items-center gap-1" role="tablist" aria-label="Workspace views">
                 <button
                   type="button"
@@ -227,72 +236,48 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
               </div>
             </div>
 
-            {/* Slice 3 Workspace Preview Slot (replaced by full Roster & Summary grids in T4) */}
-            <div className="p-5">
-              {activeTab === 'roster' ? (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3.5">
-                      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                        <FileSpreadsheet className="h-3.5 w-3.5 text-indigo-600" aria-hidden="true" />
-                        Demand Dataset
-                      </div>
-                      <p className="mt-1.5 text-lg font-semibold text-slate-900">
-                        {viewModel?.summary.totalTransactions !== null &&
-                        viewModel?.summary.totalTransactions !== undefined
-                          ? `${viewModel.summary.totalTransactions.toLocaleString()} txns`
-                          : 'Not imported'}
-                      </p>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3.5">
-                      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                        <Clock className="h-3.5 w-3.5 text-indigo-600" aria-hidden="true" />
-                        Shift Templates
-                      </div>
-                      <p className="mt-1.5 text-lg font-semibold text-slate-900">
-                        {schedule.shifts.length} active
-                      </p>
-                      <p className="mt-0.5 text-xs text-slate-600">
-                        {schedule.shifts
-                          .map((s) => formatShiftRange(s.startHour, s.endHour))
-                          .join(', ') || 'None configured'}
-                      </p>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3.5">
-                      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                        <Users className="h-3.5 w-3.5 text-indigo-600" aria-hidden="true" />
-                        Assignments
-                      </div>
-                      <p className="mt-1.5 text-lg font-semibold text-slate-900">
-                        {schedule.assignments.length} shifts ·{' '}
-                        {viewModel?.summary.totalStaffHours ?? 0}h
-                      </p>
-                    </div>
-                  </div>
+            {/* Active Tab Content */}
+            {viewModel && activeTab === 'roster' && (
+              <WeeklyRosterGrid
+                shifts={schedule.shifts}
+                staff={schedule.staff}
+                assignments={schedule.assignments}
+                summary={viewModel.summary}
+                assignmentWarnings={viewModel.assignmentWarnings}
+                unusedCapacityHours={viewModel.health.unusedCapacityHours}
+                highlightedStaffId={highlightedStaffId}
+                highlightedOverLimitOnly={highlightedOverLimitOnly}
+                conflictAssignmentIds={conflictAssignmentIds}
+                newAutoAssignmentIds={newAutoAssignmentIds}
+                focusedSlot={focusedSlot}
+                onClearFocus={() => setFocusedSlot(null)}
+                onAssign={(day, shiftId, staffId) => {
+                  store.assignStaffToShift(schedule.id, { day, shiftId, staffId });
+                  setConflictAssignmentIds(new Set());
+                }}
+                onReassign={(assignmentId, newStaffId) => {
+                  store.reassignStaff(schedule.id, assignmentId, newStaffId);
+                  setConflictAssignmentIds(new Set());
+                }}
+                onTogglePin={(assignmentId) => {
+                  store.togglePinAssignment(schedule.id, assignmentId);
+                  setConflictAssignmentIds(new Set());
+                }}
+                onRemove={(assignmentId) => {
+                  store.unassignStaff(schedule.id, assignmentId);
+                  setConflictAssignmentIds(new Set());
+                }}
+                onOpenManageShifts={() => setShiftsModalOpen(true)}
+              />
+            )}
 
-                  <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/60 px-5 py-8 text-center">
-                    <p className="text-sm font-medium text-slate-800">
-                      Weekly Roster Grid ready for Slice 4 (`T4`)
-                    </p>
-                    <p className="mt-1 text-xs text-slate-600">
-                      Use Import CSV, Shifts, Target N, Team Panel, and Auto-schedule above to
-                      prepare schedule inputs and verify live persistence.
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/60 px-5 py-10 text-center">
-                  <p className="text-sm font-medium text-slate-800">
-                    Hourly Summary (7×16) Grid ready for Slice 4 (`T4`)
-                  </p>
-                  <p className="mt-1 text-xs text-slate-600">
-                    Total Transactions:{' '}
-                    <strong>{viewModel?.summary.totalTransactions ?? '–'}</strong> · Total Staff
-                    Hours: <strong>{viewModel?.summary.totalStaffHours ?? 0}h</strong>
-                  </p>
-                </div>
-              )}
-            </div>
+            {viewModel && activeTab === 'summary' && (
+              <AggregatedSummaryView
+                summary={viewModel.summary}
+                targetN={schedule.targetTxnsPerStaffHour}
+                onJumpToRosterCell={handleJumpToRosterCell}
+              />
+            )}
           </section>
 
           <StaffPanel
@@ -300,6 +285,7 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
             staffMetrics={viewModel?.staffMetrics ?? {}}
             highlightedStaffId={highlightedStaffId}
             onSelectStaff={(staffId) => {
+              setHighlightedOverLimitOnly(false);
               setHighlightedStaffId(staffId);
               if (staffId) setActiveTab('roster');
             }}
@@ -340,7 +326,8 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
         onImport={(csvText, sourceFileName) => {
           const res = store.importCsvToSchedule(schedule.id, csvText, sourceFileName);
           if (res.ok) {
-            setFeedback({
+            setBanner({
+              kind: 'notice',
               tone: 'success',
               title: `Imported ${res.totalTransactions.toLocaleString()} weekly transactions from "${
                 sourceFileName ?? 'CSV'
