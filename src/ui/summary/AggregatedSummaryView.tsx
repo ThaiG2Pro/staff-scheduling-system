@@ -129,7 +129,7 @@ export function AggregatedSummaryView({
                   key={day}
                   scope="col"
                   className={`sticky top-0 z-20 border-r border-slate-200 px-2.5 py-2 text-center text-xs font-semibold text-slate-900 last:border-r-0 ${
-                    day >= 5 ? 'bg-slate-200/70' : 'bg-slate-100'
+                    day >= 5 ? 'bg-slate-200' : 'bg-slate-100'
                   }`}
                 >
                   {DAY_LABELS[day]}
