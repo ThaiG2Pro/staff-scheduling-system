@@ -307,6 +307,10 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
               {activeTab === 'roster' ? (
                 <div className="flex flex-wrap items-center justify-end gap-x-3.5 gap-y-1.5 text-[11px] font-medium text-slate-700">
                   <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                    <span className="h-3.5 w-1.5 rounded-full bg-emerald-600" aria-hidden="true" />
+                    Scheduled
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
                     <span className="h-3.5 w-1.5 rounded-full bg-indigo-600" aria-hidden="true" />
                     Pinned
                   </span>
