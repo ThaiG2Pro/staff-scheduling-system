@@ -1,0 +1,1927 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Staff Scheduling — Interactive Prototype (T2.5)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    /* Layer 0: Cool soft slate canvas — eliminates white-on-white glare */
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background-color: #e6ecf3; }
+    ::-webkit-scrollbar { width: 7px; height: 7px; }
+    ::-webkit-scrollbar-track { background: #eef2f6; }
+    ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+    .chip-highlight {
+      box-shadow: 0 0 0 2px #4338ca, 0 4px 10px -2px rgba(67, 56, 202, 0.28);
+    }
+    .chip-conflict-pulse {
+      box-shadow: 0 0 0 2px #e11d48, 0 0 0 5px rgba(225, 29, 72, 0.22);
+    }
+    .cell-jump-focus {
+      box-shadow: inset 0 0 0 2px #4f46e5;
+      background-color: #eef2ff !important;
+    }
+    /* Readable quiet "+ Add" (visible at 0.78, crisp 1.0 on cell hover/focus) */
+    .roster-cell .quiet-add { opacity: 0.78; }
+    .roster-cell:hover .quiet-add,
+    .roster-cell:focus-within .quiet-add,
+    .roster-cell .quiet-add:focus { opacity: 1; }
+  </style>
+</head>
+<body class="text-slate-900 antialiased min-h-screen flex flex-col">
+
+  <!-- ===================================================================== -->
+  <!-- PROTOTYPE CONTROL STRIP (Review-only bar — excluded from final app)   -->
+  <!-- ===================================================================== -->
+  <div class="bg-slate-950 text-slate-200 px-4 py-1.5 text-[11px] flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-slate-800 sticky top-0 z-50">
+    <span class="font-semibold tracking-wide text-indigo-300 flex items-center gap-1.5">
+      <span class="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
+      T2.5 Prototype Controls
+    </span>
+
+    <div class="flex items-center gap-1">
+      <span class="text-slate-300 mr-0.5">Screen:</span>
+      <button onclick="setScreen('workspace')" id="ctrl-screen-workspace" class="px-2 py-0.5 rounded bg-indigo-600 text-white font-medium">Workspace</button>
+      <button onclick="setScreen('list')" id="ctrl-screen-list" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200">Schedule List</button>
+      <button onclick="setScreen('list-empty')" id="ctrl-screen-list-empty" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200">List (Empty)</button>
+    </div>
+
+    <div class="flex items-center gap-1.5">
+      <span class="text-slate-300">Storage:</span>
+      <select id="ctrl-storage" onchange="setStorageMode(this.value)" class="bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-slate-100">
+        <option value="normal">normal (saved)</option>
+        <option value="save_error">normal (save_error)</option>
+        <option value="recovery_locked">recovery_locked</option>
+        <option value="incompatible_version_locked">incompatible_version_locked</option>
+        <option value="storage_unavailable_locked">storage_unavailable_locked</option>
+      </select>
+    </div>
+
+    <div class="flex items-center gap-1.5">
+      <span class="text-slate-300">Banner:</span>
+      <select id="ctrl-banner" onchange="setBannerDemo(this.value)" class="bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-slate-100">
+        <option value="none">None</option>
+        <option value="auto_success">Auto-schedule Success</option>
+        <option value="pin_conflict">Pin Conflict</option>
+        <option value="csv_error">CSV Import Error</option>
+        <option value="empty_onboarding">Empty Onboarding</option>
+      </select>
+    </div>
+
+    <div class="flex items-center gap-1 ml-auto">
+      <span class="text-slate-300 mr-0.5">Modals:</span>
+      <button onclick="openModal('staff')" class="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700">Staff Form</button>
+      <button onclick="openModal('shifts')" class="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700">Shifts</button>
+      <button onclick="openModal('csv')" class="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700">CSV</button>
+      <button onclick="openModal('delete')" class="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700">Delete</button>
+    </div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- STORAGE LOCK / RECOVERY BANNER                                        -->
+  <!-- ===================================================================== -->
+  <div id="storage-lock-banner" class="hidden"></div>
+
+  <!-- ===================================================================== -->
+  <!-- SCREEN 1: SCHEDULE LIST                                               -->
+  <!-- ===================================================================== -->
+  <main id="screen-list" class="hidden flex-1 max-w-5xl w-full mx-auto px-6 py-10">
+    <div class="flex items-end justify-between mb-8">
+      <div>
+        <h1 class="text-2xl font-bold text-slate-900 tracking-tight">Weekly Schedules</h1>
+        <p class="text-sm text-slate-600 mt-1">Stored locally in your browser. Open a week to manage or start with the Demo Store.</p>
+      </div>
+      <div class="flex items-center gap-2.5">
+        <button onclick="setScreen('workspace')" class="px-3.5 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-sm font-medium text-slate-800 shadow-xs transition">
+          Load Demo Store
+        </button>
+        <button onclick="setScreen('workspace')" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-sm font-semibold text-white shadow-sm transition flex items-center gap-1.5">
+          <span class="ico" data-icon="plus"></span> Create Schedule
+        </button>
+      </div>
+    </div>
+
+    <!-- Populated List -->
+    <div id="list-populated" class="grid grid-cols-1 md:grid-cols-2 gap-5">
+      <div class="bg-white rounded-2xl border border-slate-300/80 p-5 shadow-xs hover:border-indigo-400 hover:shadow-md transition flex flex-col justify-between">
+        <div>
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <h2 class="text-base font-semibold text-slate-900">Demo Store — Typical Week</h2>
+              <p class="text-xs text-slate-600 mt-0.5">Updated 2 mins ago</p>
+            </div>
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> Demand loaded
+            </span>
+          </div>
+          <div class="mt-5 grid grid-cols-3 gap-3 bg-slate-100/80 rounded-xl p-3 border border-slate-200">
+            <div>
+              <div class="text-[11px] font-medium text-slate-600">Team</div>
+              <div class="text-sm font-semibold text-slate-900 mt-0.5">9 staff</div>
+            </div>
+            <div>
+              <div class="text-[11px] font-medium text-slate-600">Scheduled</div>
+              <div class="text-sm font-semibold text-slate-900 mt-0.5 tabular-nums">264 / 264h</div>
+            </div>
+            <div>
+              <div class="text-[11px] font-medium text-slate-600">Target</div>
+              <div class="text-sm font-semibold text-slate-900 mt-0.5 tabular-nums">15 txns/hr</div>
+            </div>
+          </div>
+        </div>
+        <div class="mt-5 pt-3.5 border-t border-slate-200 flex items-center justify-between">
+          <button onclick="setScreen('workspace')" class="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition flex items-center gap-1.5">
+            Open Workspace <span class="ico" data-icon="arrowRight"></span>
+          </button>
+          <div class="flex items-center gap-1 text-xs">
+            <button class="px-2.5 py-1.5 rounded-lg text-slate-700 hover:text-slate-900 hover:bg-slate-100 font-medium transition">Rename</button>
+            <button onclick="openModal('delete')" class="px-2.5 py-1.5 rounded-lg text-rose-700 hover:bg-rose-50 font-medium transition">Delete</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-slate-300/80 p-5 shadow-xs hover:border-indigo-400 hover:shadow-md transition flex flex-col justify-between">
+        <div>
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <h2 class="text-base font-semibold text-slate-900">Next Week — Holiday Prep</h2>
+              <p class="text-xs text-slate-600 mt-0.5">Updated yesterday</p>
+            </div>
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-300">
+              <span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span> No CSV yet
+            </span>
+          </div>
+          <div class="mt-5 grid grid-cols-3 gap-3 bg-slate-100/80 rounded-xl p-3 border border-slate-200">
+            <div>
+              <div class="text-[11px] font-medium text-slate-600">Team</div>
+              <div class="text-sm font-semibold text-slate-900 mt-0.5">4 staff</div>
+            </div>
+            <div>
+              <div class="text-[11px] font-medium text-slate-600">Scheduled</div>
+              <div class="text-sm font-semibold text-slate-900 mt-0.5 tabular-nums">0 / 128h</div>
+            </div>
+            <div>
+              <div class="text-[11px] font-medium text-slate-600">Target</div>
+              <div class="text-sm font-semibold text-slate-900 mt-0.5 tabular-nums">15 txns/hr</div>
+            </div>
+          </div>
+        </div>
+        <div class="mt-5 pt-3.5 border-t border-slate-200 flex items-center justify-between">
+          <button onclick="setScreen('workspace')" class="px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition flex items-center gap-1.5">
+            Open Workspace <span class="ico" data-icon="arrowRight"></span>
+          </button>
+          <div class="flex items-center gap-1 text-xs">
+            <button class="px-2.5 py-1.5 rounded-lg text-slate-700 hover:text-slate-900 hover:bg-slate-100 font-medium transition">Rename</button>
+            <button onclick="openModal('delete')" class="px-2.5 py-1.5 rounded-lg text-rose-700 hover:bg-rose-50 font-medium transition">Delete</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Empty List State -->
+    <div id="list-empty" class="hidden bg-white rounded-2xl border border-slate-300/80 p-14 text-center shadow-xs">
+      <div class="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-200 text-indigo-700 mx-auto flex items-center justify-center mb-4">
+        <span class="ico" data-icon="calendarLg"></span>
+      </div>
+      <h2 class="text-lg font-semibold text-slate-900">Create your first weekly schedule</h2>
+      <p class="text-sm text-slate-600 max-w-md mx-auto mt-1.5 leading-relaxed">
+        Start with a blank schedule or load the Demo Store (9 staff, 2 default shifts, and 7-day customer demand) to test Auto-schedule in one click.
+      </p>
+      <div class="mt-6 flex items-center justify-center gap-3">
+        <button onclick="setScreen('workspace')" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-sm font-semibold text-white shadow-sm transition">
+          + Create Schedule
+        </button>
+        <button onclick="setScreen('workspace')" class="px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-sm font-medium text-slate-800 shadow-xs transition">
+          Load Demo Store
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ===================================================================== -->
+  <!-- SCREEN 2: SCHEDULE WORKSPACE                                          -->
+  <!-- ===================================================================== -->
+  <div id="screen-workspace" class="flex-1 flex flex-col min-w-[1060px]">
+
+    <!-- REGION 1: TOP ACTION BAR -->
+    <header class="bg-white border-b border-slate-300/80 px-5 py-2.5 flex items-center justify-between gap-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+      <div class="flex items-center gap-3 min-w-0">
+        <button onclick="setScreen('list')" class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700 transition shrink-0">
+          <span class="ico" data-icon="arrowLeft"></span> Schedules
+        </button>
+        <div class="flex items-center gap-1 min-w-0">
+          <input
+            type="text"
+            value="Demo Store — Typical Week"
+            aria-label="Schedule name"
+            class="text-[15px] font-bold text-slate-900 tracking-tight bg-transparent hover:bg-slate-100/80 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 border border-transparent rounded-lg px-2 py-1 w-64 xl:w-72 truncate transition"
+          />
+        </div>
+        <span id="save-status-badge" class="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full shrink-0">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+          Saved locally
+        </span>
+      </div>
+
+      <div class="flex items-center gap-2 shrink-0">
+        <button onclick="openModal('csv')" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-xs font-semibold text-slate-800 transition">
+          <span class="ico" data-icon="upload"></span> Import CSV
+        </button>
+        <button onclick="openModal('shifts')" title="Manage shift templates" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-xs font-semibold text-slate-800 transition">
+          <span class="ico" data-icon="clock"></span> Shifts
+        </button>
+
+        <!-- Target Rate Pill -->
+        <div class="flex items-center gap-1 bg-slate-100 border border-slate-300/90 rounded-lg px-2.5 py-1 relative" title="Target transactions per staff hour (N, 1–500)">
+          <label for="target-n-input" class="text-xs font-semibold text-slate-700 whitespace-nowrap">Target</label>
+          <button onclick="stepTargetN(-1)" aria-label="Decrease target" class="w-5 h-5 rounded-md bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 flex items-center justify-center transition">
+            <span class="ico" data-icon="minus"></span>
+          </button>
+          <input
+            id="target-n-input"
+            type="text"
+            inputmode="decimal"
+            value="15"
+            oninput="handleTargetNInput(this.value)"
+            class="w-11 text-center text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded-md py-0.5 tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
+          />
+          <button onclick="stepTargetN(1)" aria-label="Increase target" class="w-5 h-5 rounded-md bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 flex items-center justify-center transition">
+            <span class="ico" data-icon="plusSm"></span>
+          </button>
+          <span class="text-[11px] font-medium text-slate-600 whitespace-nowrap">txns/hr</span>
+          <div id="target-n-error" class="hidden absolute top-full right-0 mt-1.5 w-64 bg-rose-50 border border-rose-300 text-rose-900 text-[11px] font-medium px-3 py-2 rounded-xl shadow-lg z-30"></div>
+        </div>
+
+        <button
+          id="btn-auto-schedule"
+          onclick="simulateAutoSchedule()"
+          class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-semibold shadow-sm shadow-indigo-700/20 transition"
+        >
+          <span class="ico" data-icon="sparkles"></span> Auto-schedule
+        </button>
+
+        <!-- Safe More Menu (⋯) for destructive schedule actions -->
+        <div class="relative" id="schedule-more-wrap">
+          <button
+            onclick="toggleMoreMenu(event)"
+            aria-label="More schedule actions"
+            title="More schedule actions"
+            class="p-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 transition"
+          >
+            <span class="ico" data-icon="moreHorizontal"></span>
+          </button>
+          <div id="schedule-more-menu" class="hidden absolute right-0 top-full mt-1.5 w-48 bg-white rounded-xl border border-slate-300 shadow-xl py-1.5 z-40 text-xs">
+            <button onclick="closeMoreMenu(); openModal('delete')" class="w-full text-left px-3.5 py-2 text-rose-700 hover:bg-rose-50 font-semibold flex items-center gap-2 transition">
+              <span class="ico" data-icon="trash"></span> Delete Schedule…
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN CONTENT CONTAINER -->
+    <div class="flex-1 flex flex-col px-5 py-4 gap-3.5 max-w-[1680px] w-full mx-auto">
+
+      <!-- REGION 2: UNIFIED LIVE HEALTH STRIP -->
+      <section aria-label="Schedule Health Bar" class="bg-white rounded-xl border border-slate-300/80 shadow-xs overflow-hidden">
+        <div class="grid grid-cols-4 divide-x divide-slate-200" id="health-bar-grid"></div>
+      </section>
+
+      <!-- REGION 4: CONTEXTUAL BANNERS -->
+      <div id="contextual-banner-slot" class="hidden"></div>
+
+      <!-- REGION 3: MAIN SPLIT WORKSPACE -->
+      <div class="flex-1 flex min-h-0 gap-4 items-start">
+
+        <!-- LEFT: TABBED CORE VIEW -->
+        <section class="flex-1 min-w-0 bg-white rounded-xl border border-slate-300/80 shadow-xs flex flex-col overflow-hidden">
+          <!-- Sub-header Tabs & Legend -->
+          <div class="px-4 py-2.5 border-b border-slate-200 bg-slate-50/80 flex items-center justify-between gap-3">
+            <div class="inline-flex items-center gap-1 bg-slate-200/80 p-0.5 rounded-lg">
+              <button id="tab-roster" onclick="setActiveTab('roster')" class="px-3 py-1.5 rounded-md text-xs font-semibold bg-white text-slate-900 shadow-xs transition">
+                Weekly Roster
+              </button>
+              <button id="tab-summary" onclick="setActiveTab('summary')" title="Aggregated Summary (7 days × 16 hours)" class="px-3 py-1.5 rounded-md text-xs font-semibold text-slate-600 hover:text-slate-900 transition">
+                Hourly Summary
+              </button>
+            </div>
+
+            <!-- Roster right toolbar -->
+            <div id="roster-toolbar" class="flex items-center gap-3.5 text-[11px] font-medium text-slate-700 flex-wrap justify-end">
+              <span class="inline-flex items-center gap-1.5">
+                <span class="w-1.5 h-3.5 rounded-full bg-indigo-600"></span> Pinned
+              </span>
+              <span class="inline-flex items-center gap-1.5">
+                <span class="w-1.5 h-3.5 rounded-full bg-amber-600"></span> 2+ shifts / overlap
+              </span>
+              <span class="inline-flex items-center gap-1">
+                <span class="px-1 py-0.2 rounded bg-rose-100 border border-rose-300 text-rose-800 text-[9px] font-bold">OT</span> Over weekly cap
+              </span>
+              <span id="jump-focus-indicator" class="hidden inline-flex items-center gap-1.5 bg-indigo-100 text-indigo-900 border border-indigo-300 px-2.5 py-0.5 rounded-full font-semibold">
+                <span id="jump-focus-label"></span>
+                <button onclick="clearJumpFocus()" class="hover:text-indigo-950 ml-0.5" aria-label="Clear focus">
+                  <span class="ico" data-icon="xSm"></span>
+                </button>
+              </span>
+              <span id="highlight-indicator" class="hidden inline-flex items-center gap-1.5 bg-indigo-100 text-indigo-900 border border-indigo-300 px-2.5 py-0.5 rounded-full font-semibold">
+                Showing <strong id="highlight-name"></strong>
+                <button onclick="clearStaffHighlight()" class="hover:text-indigo-950 ml-0.5" aria-label="Clear highlight">
+                  <span class="ico" data-icon="xSm"></span>
+                </button>
+              </span>
+            </div>
+
+            <!-- Summary right toolbar -->
+            <div id="summary-toolbar" class="hidden flex items-center gap-2 text-xs">
+              <span class="text-slate-600 text-[11px] font-medium">Display:</span>
+              <div class="inline-flex rounded-lg bg-slate-200/80 p-0.5">
+                <button id="btn-view-metrics" onclick="setSummaryMode('metrics')" class="px-2.5 py-1 rounded-md text-xs font-semibold bg-white text-slate-900 shadow-xs transition">
+                  Workload
+                </button>
+                <button id="btn-view-coverage" onclick="setSummaryMode('coverage')" class="px-2.5 py-1 rounded-md text-xs font-semibold text-slate-600 hover:text-slate-900 transition" title="Conditional P1 Coverage View — scheduled vs. required staff">
+                  Staffing vs. Needed
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 1: WEEKLY ROSTER -->
+          <div id="panel-roster" class="overflow-auto max-h-[600px]">
+            <!-- Empty Schedule 3-Step Onboarding -->
+            <div id="roster-empty-onboarding" class="hidden py-14 px-6 text-center">
+              <h3 class="text-base font-bold text-slate-900">Get started with this week's schedule</h3>
+              <p class="text-xs text-slate-600 mt-1 mb-6">Follow 3 quick steps to run Auto-schedule, or load the Demo Store.</p>
+              <div class="grid grid-cols-3 gap-4 max-w-2xl mx-auto text-left mb-7">
+                <div class="p-4 rounded-xl border border-slate-200 bg-slate-50">
+                  <div class="text-[11px] font-bold text-indigo-700 uppercase tracking-wider">Step 1</div>
+                  <div class="text-sm font-semibold text-slate-900 mt-1">Import CSV Demand</div>
+                  <p class="text-xs text-slate-600 mt-1 leading-relaxed">Upload 7-day hourly customer transactions (07:00–22:00).</p>
+                </div>
+                <div class="p-4 rounded-xl border border-slate-200 bg-slate-50">
+                  <div class="text-[11px] font-bold text-indigo-700 uppercase tracking-wider">Step 2</div>
+                  <div class="text-sm font-semibold text-slate-900 mt-1">Add Staff</div>
+                  <p class="text-xs text-slate-600 mt-1 leading-relaxed">Add team members and their weekly hour caps.</p>
+                </div>
+                <div class="p-4 rounded-xl border border-slate-200 bg-slate-50">
+                  <div class="text-[11px] font-bold text-indigo-700 uppercase tracking-wider">Step 3</div>
+                  <div class="text-sm font-semibold text-slate-900 mt-1">Run Auto-schedule</div>
+                  <p class="text-xs text-slate-600 mt-1 leading-relaxed">Generate a balanced draft, then pin and fine-tune.</p>
+                </div>
+              </div>
+              <button onclick="setBannerDemo('none')" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-sm transition">
+                Load Demo Store
+              </button>
+            </div>
+
+            <!-- Shift-first Grid -->
+            <div id="roster-grid-container"></div>
+          </div>
+
+          <!-- TAB 2: HOURLY SUMMARY -->
+          <div id="panel-summary" class="hidden p-4 flex flex-col gap-3.5">
+            <div id="summary-kpis" class="grid grid-cols-4 gap-3"></div>
+            <div id="summary-legend" class="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-700 bg-slate-100/80 border border-slate-200 rounded-lg px-3 py-2"></div>
+            <div class="border border-slate-300/80 rounded-xl overflow-auto max-h-[540px]" id="summary-table-container"></div>
+          </div>
+        </section>
+
+        <!-- RIGHT: FIXED TEAM PANEL -->
+        <aside class="w-[296px] xl:w-[316px] shrink-0 bg-white rounded-xl border border-slate-300/80 shadow-xs flex flex-col overflow-hidden sticky top-12">
+          <div class="px-4 py-3 border-b border-slate-200 bg-slate-50/80">
+            <div class="flex items-center justify-between">
+              <h2 class="text-sm font-bold text-slate-900">Team</h2>
+              <button onclick="openModal('staff')" class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition">
+                <span class="ico" data-icon="plusSm"></span> Add Staff
+              </button>
+            </div>
+            <div id="staff-panel-totals" class="text-xs text-slate-700 mt-1.5"></div>
+            <!-- Compact Search & Filter/Sort -->
+            <div class="mt-2.5 flex items-center gap-1.5">
+              <div class="relative flex-1">
+                <span class="ico absolute left-2 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none" data-icon="search"></span>
+                <input
+                  id="staff-search-input"
+                  type="text"
+                  placeholder="Filter team…"
+                  oninput="setStaffSearch(this.value)"
+                  class="w-full pl-7 pr-2 py-1 rounded-lg border border-slate-300 bg-white text-[11px] font-medium text-slate-900 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
+                />
+              </div>
+              <button
+                id="btn-staff-sort"
+                onclick="toggleStaffSort()"
+                title="Sort by remaining weekly hours"
+                class="px-2 py-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-[11px] font-semibold text-slate-700 shrink-0 transition"
+              >Sort: Name</button>
+            </div>
+            <div id="staff-filter-pills" class="mt-2 flex items-center gap-1 text-[11px]"></div>
+          </div>
+          <div id="staff-list-container" class="divide-y divide-slate-200/80 max-h-[540px] overflow-y-auto"></div>
+          <div class="px-4 py-2.5 bg-slate-100/80 border-t border-slate-200 text-[11px] font-medium text-slate-600">
+            Click any team member to highlight their shifts.
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- INLINE ASSIGNMENT GUIDANCE POPOVER                                    -->
+  <!-- ===================================================================== -->
+  <div id="guidance-popover" class="hidden fixed z-40 w-80 bg-white rounded-xl border border-slate-300 shadow-2xl shadow-slate-900/20 overflow-hidden">
+    <div id="popover-content"></div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- FLOATING UNDO TOAST (5s auto-dismiss + Ctrl+Z)                        -->
+  <!-- ===================================================================== -->
+  <div id="undo-toast" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white px-4 py-2.5 rounded-xl shadow-2xl border border-slate-700 flex items-center gap-3 text-xs">
+    <span id="undo-toast-msg" class="font-medium text-slate-100"></span>
+    <button onclick="performUndo()" class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white font-semibold transition">
+      <span class="ico" data-icon="undo"></span> Undo
+    </button>
+    <span class="text-[10px] text-slate-300 hidden sm:inline">Ctrl+Z</span>
+    <button onclick="dismissToast()" aria-label="Dismiss" class="text-slate-300 hover:text-white p-0.5 transition">
+      <span class="ico" data-icon="xSm"></span>
+    </button>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- MODAL BACKDROP                                                        -->
+  <!-- ===================================================================== -->
+  <div id="modal-backdrop" class="hidden fixed inset-0 bg-slate-900/45 backdrop-blur-[2px] z-50 flex items-center justify-center p-4" onclick="if(event.target===this) closeModal()">
+    <div id="modal-box" class="bg-white rounded-2xl border border-slate-300 shadow-2xl max-w-md w-full overflow-hidden"></div>
+  </div>
+
+  <script>
+    // =========================================================================
+    // CRISP LUCIDE-STYLE SVG ICON LIBRARY
+    // =========================================================================
+    const ICONS = {
+      arrowLeft:  '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>',
+      arrowRight: '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>',
+      plus:       '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+      plusSm:     '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+      minus:      '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14"/></svg>',
+      xSm:        '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+      x:          '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+      trash:      '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>',
+      edit:       '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>',
+      upload:     '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>',
+      clock:      '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+      sparkles:   '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>',
+      pin:        '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>',
+      pinFilled:  '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>',
+      alert:      '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>',
+      alertSm:    '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>',
+      check:      '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+      lock:       '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+      calendarLg: '<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>',
+      fileUp:     '<svg class="w-7 h-7 text-slate-600 mx-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M12 12v6"/><path d="m15 15-3-3-3 3"/></svg>',
+      moreHorizontal: '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="19" cy="12" r="1.2" fill="currentColor"/><circle cx="5" cy="12" r="1.2" fill="currentColor"/></svg>',
+      undo:       '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>',
+      search:     '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>',
+      halfCircle: '<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18Z" fill="currentColor"/></svg>',
+    };
+
+    function hydrateStaticIcons() {
+      document.querySelectorAll('.ico[data-icon]').forEach(el => {
+        const key = el.getAttribute('data-icon');
+        if (ICONS[key]) el.innerHTML = ICONS[key];
+      });
+    }
+
+    // Crisp, accessible avatar tints (WCAG AA contrast on badge)
+    const AVATAR_PALETTE = [
+      'bg-indigo-100 text-indigo-800 border border-indigo-200',
+      'bg-sky-100 text-sky-800 border border-sky-200',
+      'bg-emerald-100 text-emerald-800 border border-emerald-200',
+      'bg-violet-100 text-violet-800 border border-violet-200',
+      'bg-amber-100 text-amber-900 border border-amber-200',
+      'bg-rose-100 text-rose-800 border border-rose-200',
+      'bg-teal-100 text-teal-800 border border-teal-200',
+      'bg-blue-100 text-blue-800 border border-blue-200',
+      'bg-fuchsia-100 text-fuchsia-800 border border-fuchsia-200',
+    ];
+
+    function getInitials(name) {
+      const parts = name.trim().split(/\s+/);
+      if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+
+    function getAvatarClass(staffId) {
+      const idx = state.staff.findIndex(s => s.id === staffId);
+      return AVATAR_PALETTE[(idx >= 0 ? idx : 0) % AVATAR_PALETTE.length];
+    }
+
+    // =========================================================================
+    // DEMO STORE DATA (1:1 with src/domain/demoData.ts)
+    // =========================================================================
+    const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const HOURS = [7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22];
+
+    const RAW_CSV_ROWS = {
+      7:  [12,22,13,16,22,13,7],
+      8:  [32,35,33,45,25,44,32],
+      9:  [39,48,32,49,27,57,41],
+      10: [35,41,28,41,38,41,42],
+      11: [32,30,33,40,40,42,37],
+      12: [33,52,33,40,25,47,30],
+      13: [45,48,45,45,64,44,38],
+      14: [45,33,31,34,42,37,18],
+      15: [25,22,25,23,30,37,22],
+      16: [13,14,14,14,19,27,28],
+      17: [18,22,34,20,27,21,19],
+      18: [19,24,19,20,18,21,16],
+      19: [18,25,22,33,24,31,22],
+      20: [15,26,15,32,34,34,24],
+      21: [4,9,10,12,12,7,8],
+      22: [7,2,6,6,5,5,6],
+    };
+
+    const state = {
+      screen: 'workspace',
+      storageMode: 'normal',
+      bannerDemo: 'none',
+      activeTab: 'roster',
+      summaryMode: 'metrics',
+      targetN: 15,
+      highlightedStaffId: null,
+      conflictAssignmentIds: new Set(),
+      popover: null,
+      undoStack: [],
+      toastTimer: null,
+      autoReview: null,
+      jumpFocus: null,
+      staffFilter: 'all', // 'all' | 'under' | 'over'
+      staffSearch: '',
+      staffSort: 'name',  // 'name' | 'remaining'
+      staff: [
+        { id: 's1', name: 'Alice Nguyen', maxWeeklyHours: 40 },
+        { id: 's2', name: 'Brian Tran',   maxWeeklyHours: 40 },
+        { id: 's3', name: 'Chloe Le',     maxWeeklyHours: 40 },
+        { id: 's4', name: 'David Pham',   maxWeeklyHours: 32 },
+        { id: 's5', name: 'Elena Vo',     maxWeeklyHours: 32 },
+        { id: 's6', name: 'Felix Hoang',  maxWeeklyHours: 24 },
+        { id: 's7', name: 'Grace Bui',    maxWeeklyHours: 24 },
+        { id: 's8', name: 'Henry Dang',   maxWeeklyHours: 16 },
+        { id: 's9', name: 'Iris Do',      maxWeeklyHours: 16 },
+      ],
+      shifts: [
+        { id: 'sh1', startHour: 7,  endHour: 15 },
+        { id: 'sh2', startHour: 11, endHour: 19 },
+        { id: 'sh3', startHour: 15, endHour: 23 },
+      ],
+      assignments: [
+        { id: 'a1',  day: 0, shiftId: 'sh1', staffId: 's1', isPinned: true },
+        { id: 'a2',  day: 0, shiftId: 'sh1', staffId: 's4', isPinned: false },
+        { id: 'a3',  day: 0, shiftId: 'sh2', staffId: 's6', isPinned: false },
+        { id: 'a4',  day: 0, shiftId: 'sh3', staffId: 's2', isPinned: false },
+        { id: 'a5',  day: 1, shiftId: 'sh1', staffId: 's1', isPinned: false },
+        { id: 'a6',  day: 1, shiftId: 'sh1', staffId: 's5', isPinned: false },
+        { id: 'a7',  day: 1, shiftId: 'sh2', staffId: 's3', isPinned: false },
+        { id: 'a8',  day: 1, shiftId: 'sh3', staffId: 's7', isPinned: false },
+        { id: 'a9',  day: 2, shiftId: 'sh1', staffId: 's2', isPinned: false },
+        { id: 'a10', day: 2, shiftId: 'sh1', staffId: 's4', isPinned: false },
+        { id: 'a11', day: 2, shiftId: 'sh3', staffId: 's3', isPinned: true },
+        { id: 'a12', day: 2, shiftId: 'sh3', staffId: 's8', isPinned: false },
+        { id: 'a13', day: 3, shiftId: 'sh1', staffId: 's1', isPinned: false },
+        { id: 'a14', day: 3, shiftId: 'sh1', staffId: 's5', isPinned: false },
+        { id: 'a15', day: 3, shiftId: 'sh2', staffId: 's2', isPinned: false },
+        { id: 'a16', day: 3, shiftId: 'sh3', staffId: 's9', isPinned: false },
+        { id: 'a17', day: 4, shiftId: 'sh1', staffId: 's3', isPinned: false },
+        { id: 'a18', day: 4, shiftId: 'sh1', staffId: 's6', isPinned: false },
+        { id: 'a19', day: 4, shiftId: 'sh2', staffId: 's4', isPinned: true },
+        { id: 'a20', day: 4, shiftId: 'sh3', staffId: 's5', isPinned: false },
+        { id: 'a21', day: 5, shiftId: 'sh1', staffId: 's1', isPinned: true },
+        { id: 'a22', day: 5, shiftId: 'sh1', staffId: 's2', isPinned: false },
+        { id: 'a23', day: 5, shiftId: 'sh2', staffId: 's7', isPinned: false },
+        { id: 'a24', day: 5, shiftId: 'sh3', staffId: 's3', isPinned: false },
+        { id: 'a25', day: 5, shiftId: 'sh3', staffId: 's8', isPinned: false },
+        { id: 'a26', day: 6, shiftId: 'sh1', staffId: 's4', isPinned: false },
+        { id: 'a27', day: 6, shiftId: 'sh1', staffId: 's5', isPinned: false },
+        { id: 'a28', day: 6, shiftId: 'sh2', staffId: 's9', isPinned: false },
+        { id: 'a29', day: 6, shiftId: 'sh3', staffId: 's6', isPinned: false },
+        { id: 'a30', day: 2, shiftId: 'sh2', staffId: 's1', isPinned: false },
+        { id: 'a31', day: 4, shiftId: 'sh1', staffId: 's2', isPinned: false },
+        { id: 'a32', day: 3, shiftId: 'sh1', staffId: 's3', isPinned: false },
+        { id: 'a33', day: 0, shiftId: 'sh3', staffId: 's7', isPinned: false },
+      ],
+    };
+
+    let nextId = 100;
+
+    // =========================================================================
+    // DERIVED METRICS
+    // =========================================================================
+    function formatHour(h) { return `${String(h).padStart(2, '0')}:00`; }
+    function getShift(shiftId) { return state.shifts.find(s => s.id === shiftId); }
+    function shiftsOverlap(s1, s2) { return s1.startHour < s2.endHour && s2.startHour < s1.endHour; }
+
+    function computeDerived() {
+      const hasDemand = state.bannerDemo !== 'empty_onboarding';
+      const assignments = hasDemand ? state.assignments : [];
+
+      const staffMetrics = new Map();
+      const assignmentWarnings = new Map();
+
+      for (const st of state.staff) {
+        let totalHours = 0;
+        const multiDays = [];
+        const overlapDays = [];
+
+        for (let d = 0; d < 7; d++) {
+          const dayAsgns = assignments.filter(a => a.staffId === st.id && a.day === d);
+          const coveredHours = new Set();
+          for (const a of dayAsgns) {
+            const sh = getShift(a.shiftId);
+            if (!sh) continue;
+            for (let h = sh.startHour; h < sh.endHour; h++) coveredHours.add(h);
+          }
+          totalHours += coveredHours.size;
+
+          if (dayAsgns.length > 1) {
+            multiDays.push(DAYS[d]);
+            let hasOverlap = false;
+            for (let i = 0; i < dayAsgns.length; i++) {
+              for (let j = i + 1; j < dayAsgns.length; j++) {
+                const sh1 = getShift(dayAsgns[i].shiftId);
+                const sh2 = getShift(dayAsgns[j].shiftId);
+                if (sh1 && sh2 && shiftsOverlap(sh1, sh2)) hasOverlap = true;
+              }
+            }
+            if (hasOverlap) overlapDays.push(DAYS[d]);
+            for (const a of dayAsgns) {
+              const msgs = [];
+              if (dayAsgns.length > 1) msgs.push(`2+ shifts on ${DAYS[d]}`);
+              if (hasOverlap) msgs.push(`Overlaps another shift on ${DAYS[d]}`);
+              assignmentWarnings.set(a.id, msgs);
+            }
+          }
+        }
+
+        staffMetrics.set(st.id, {
+          assignedHours: totalHours,
+          overHours: Math.max(0, totalHours - st.maxWeeklyHours),
+          multiDays,
+          overlapDays,
+        });
+      }
+
+      let totalTransactions = 0;
+      let totalStaffHours = 0;
+      let totalRequired = 0;
+      let coveredRequired = 0;
+      let staffingGapCount = 0;
+      let activeCellCount = 0;
+      let sumActiveRates = 0;
+
+      const grid = {};
+      const dayStats = [];
+
+      for (let d = 0; d < 7; d++) {
+        let dayGaps = 0;
+        let dayShortageHours = 0;
+        let dayMaxPeakNeed = 0;
+
+        for (const h of HOURS) {
+          const txns = hasDemand ? RAW_CSV_ROWS[h][d] : 0;
+          const uniqueStaff = new Set();
+          for (const a of assignments) {
+            if (a.day !== d) continue;
+            const sh = getShift(a.shiftId);
+            if (sh && h >= sh.startHour && h < sh.endHour) uniqueStaff.add(a.staffId);
+          }
+          const staffCount = uniqueStaff.size;
+          const required = txns === 0 ? 0 : Math.ceil(txns / state.targetN);
+          const rate = staffCount > 0 ? txns / staffCount : null;
+          const isGap = hasDemand && txns > 0 && staffCount === 0;
+          const isHighLoad = rate !== null && rate > state.targetN;
+          const shortage = Math.max(0, required - staffCount);
+
+          totalTransactions += txns;
+          totalStaffHours += staffCount;
+          totalRequired += required;
+          coveredRequired += Math.min(staffCount, required);
+          if (isGap) { staffingGapCount++; dayGaps++; }
+          dayShortageHours += shortage;
+          if (shortage > dayMaxPeakNeed) dayMaxPeakNeed = shortage;
+          if (rate !== null) { activeCellCount++; sumActiveRates += rate; }
+
+          grid[`${d}-${h}`] = { txns, staffCount, required, delta: staffCount - required, shortage, rate, isGap, isHighLoad };
+        }
+        dayStats.push({ day: d, gaps: dayGaps, shortageHours: dayShortageHours, maxPeakNeed: dayMaxPeakNeed });
+      }
+
+      const shiftCellHints = {};
+      for (const sh of state.shifts) {
+        for (let d = 0; d < 7; d++) {
+          const gapHours = [];
+          const shortHours = [];
+          let maxNeed = 0;
+          if (hasDemand) {
+            for (let h = sh.startHour; h < sh.endHour; h++) {
+              const cell = grid[`${d}-${h}`];
+              if (!cell) continue;
+              if (cell.isGap) gapHours.push(formatHour(h));
+              if (cell.shortage > 0) {
+                shortHours.push(`${formatHour(h)} (-${cell.shortage})`);
+                if (cell.shortage > maxNeed) maxNeed = cell.shortage;
+              }
+            }
+          }
+          shiftCellHints[`${sh.id}-${d}`] = { gapHours, shortHours, maxNeed };
+        }
+      }
+
+      const overallRate = totalStaffHours > 0 ? totalTransactions / totalStaffHours : null;
+      const avgRate = activeCellCount > 0 ? sumActiveRates / activeCellCount : null;
+      const demandCoverage = (!hasDemand || totalRequired === 0) ? null : coveredRequired / totalRequired;
+      const overLimitStaff = state.staff.filter(s => staffMetrics.get(s.id).overHours > 0);
+      const hourLimitWarnings = overLimitStaff.length;
+
+      const eligible = state.staff.filter(s => s.maxWeeklyHours > 0);
+      let jain = null;
+      if (eligible.length > 0) {
+        const utils = eligible.map(s => staffMetrics.get(s.id).assignedHours / s.maxWeeklyHours);
+        const sumU = utils.reduce((acc, u) => acc + u, 0);
+        const sumU2 = utils.reduce((acc, u) => acc + u * u, 0);
+        if (sumU2 > 0) jain = (sumU * sumU) / (eligible.length * sumU2);
+      }
+
+      return {
+        hasDemand, staffMetrics, assignmentWarnings, grid, dayStats, shiftCellHints,
+        totalTransactions, totalStaffHours, overallRate, avgRate, demandCoverage,
+        staffingGapCount, hourLimitWarnings, overLimitStaff, jain, eligibleCount: eligible.length,
+        totalCapacity: state.staff.reduce((acc, s) => acc + s.maxWeeklyHours, 0),
+        totalAssignedStaffHours: state.staff.reduce((acc, s) => acc + staffMetrics.get(s.id).assignedHours, 0),
+      };
+    }
+
+    function getGuidanceCandidates(day, shiftId, excludeAssignmentId = null) {
+      const targetShift = getShift(shiftId);
+      const duration = targetShift.endHour - targetShift.startHour;
+      const derived = computeDerived();
+      const eligible = [];
+      const requiresAttention = [];
+
+      for (const st of state.staff) {
+        const sameSlot = state.assignments.find(
+          a => a.day === day && a.shiftId === shiftId && a.staffId === st.id && a.id !== excludeAssignmentId
+        );
+        if (sameSlot) continue;
+
+        const currentHours = derived.staffMetrics.get(st.id).assignedHours;
+        const existingAsgn = excludeAssignmentId ? state.assignments.find(a => a.id === excludeAssignmentId) : null;
+        if (existingAsgn && existingAsgn.staffId === st.id) continue;
+
+        const reasons = [];
+        const dayAsgns = state.assignments.filter(
+          a => a.day === day && a.staffId === st.id && a.id !== excludeAssignmentId
+        );
+        if (dayAsgns.length > 0) {
+          const overlaps = dayAsgns.filter(a => shiftsOverlap(getShift(a.shiftId), targetShift));
+          if (overlaps.length > 0) {
+            const sh = getShift(overlaps[0].shiftId);
+            reasons.push(`Overlaps with ${formatHour(sh.startHour)}–${formatHour(sh.endHour)}`);
+          } else {
+            reasons.push(`Already has a shift on ${DAYS[day]}`);
+          }
+        }
+
+        const projectedHours = currentHours + duration;
+        if (projectedHours > st.maxWeeklyHours) {
+          const over = projectedHours - st.maxWeeklyHours;
+          reasons.push(`Exceeds weekly limit (+${over}h → ${projectedHours}/${st.maxWeeklyHours}h)`);
+        }
+
+        const candidate = {
+          staff: st, currentHours, projectedHours,
+          remainingAfter: st.maxWeeklyHours - projectedHours, reasons,
+        };
+        if (reasons.length === 0) eligible.push(candidate);
+        else requiresAttention.push(candidate);
+      }
+
+      eligible.sort((a, b) => b.remainingAfter - a.remainingAfter);
+      return { eligible, requiresAttention };
+    }
+
+    // =========================================================================
+    // RENDERING
+    // =========================================================================
+    function render() {
+      renderStorageBanner();
+      renderScreens();
+      if (state.screen === 'workspace') {
+        const derived = computeDerived();
+        renderHealthBar(derived);
+        renderContextualBanner();
+        renderRoster(derived);
+        renderSummary(derived);
+        renderStaffPanel(derived);
+        renderAutoScheduleButton();
+      }
+      renderPopover();
+    }
+
+    function renderStorageBanner() {
+      const el = document.getElementById('storage-lock-banner');
+      const saveBadge = document.getElementById('save-status-badge');
+
+      if (state.storageMode === 'normal') {
+        el.className = 'hidden';
+        saveBadge.className = 'inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full shrink-0';
+        saveBadge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> Saved locally';
+        return;
+      }
+
+      if (state.storageMode === 'save_error') {
+        el.className = 'hidden';
+        saveBadge.className = 'inline-flex items-center gap-1.5 text-xs font-semibold text-amber-900 bg-amber-50 border border-amber-300 px-2.5 py-1 rounded-full shrink-0';
+        saveBadge.innerHTML = `${ICONS.alertSm} Unable to save locally — in memory only`;
+        return;
+      }
+
+      saveBadge.className = 'inline-flex items-center gap-1.5 text-xs font-semibold text-rose-800 bg-rose-50 border border-rose-300 px-2.5 py-1 rounded-full shrink-0';
+      saveBadge.innerHTML = `${ICONS.lock} Auto-save paused`;
+
+      if (state.storageMode === 'recovery_locked') {
+        el.className = 'bg-rose-50 border-b border-rose-300 px-5 py-3 text-xs text-rose-950 flex items-center justify-between gap-4';
+        el.innerHTML = `
+          <div class="flex items-center gap-2.5">
+            <span class="text-rose-700">${ICONS.alert}</span>
+            <div><strong>Saved data could not be loaded.</strong> Auto-save is paused to protect your existing browser data. Reset to start fresh.</div>
+          </div>
+          <button onclick="setStorageMode('normal')" class="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-semibold shrink-0 transition">Reset &amp; Start Fresh</button>`;
+      } else if (state.storageMode === 'incompatible_version_locked') {
+        el.className = 'bg-amber-50 border-b border-amber-300 px-5 py-3 text-xs text-amber-950 flex items-center justify-between gap-4';
+        el.innerHTML = `
+          <div class="flex items-center gap-2.5">
+            <span class="text-amber-700">${ICONS.lock}</span>
+            <div><strong>Newer data format detected.</strong> Auto-save is locked so newer schedule data won't be overwritten. Please update the app.</div>
+          </div>`;
+      } else if (state.storageMode === 'storage_unavailable_locked') {
+        el.className = 'bg-slate-900 border-b border-slate-800 px-5 py-3 text-xs text-slate-100 flex items-center justify-between gap-4';
+        el.innerHTML = `
+          <div class="flex items-center gap-2.5">
+            <span class="text-amber-400">${ICONS.alert}</span>
+            <div><strong>Browser storage is blocked or unavailable.</strong> Check browser privacy settings and retry. Editing is paused until storage is accessible.</div>
+          </div>
+          <button onclick="setStorageMode('normal')" class="px-3 py-1.5 rounded-lg bg-white text-slate-900 hover:bg-slate-100 font-semibold shrink-0 transition">Retry Storage Access</button>`;
+      }
+    }
+
+    function renderScreens() {
+      document.getElementById('screen-workspace').classList.toggle('hidden', state.screen !== 'workspace');
+      document.getElementById('screen-list').classList.toggle('hidden', state.screen === 'workspace');
+      document.getElementById('list-populated').classList.toggle('hidden', state.screen !== 'list');
+      document.getElementById('list-empty').classList.toggle('hidden', state.screen !== 'list-empty');
+
+      ['workspace', 'list', 'list-empty'].forEach(k => {
+        const btn = document.getElementById(`ctrl-screen-${k}`);
+        btn.className = state.screen === k
+          ? 'px-2 py-0.5 rounded bg-indigo-600 text-white font-medium'
+          : 'px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200';
+      });
+    }
+
+    function stripTone(level) {
+      switch (level) {
+        case 'good':      return { pill: 'bg-emerald-50 text-emerald-800 border-emerald-200', icon: ICONS.check,      bar: 'bg-emerald-600', label: 'Good' };
+        case 'attention': return { pill: 'bg-amber-50 text-amber-900 border-amber-300',       icon: ICONS.halfCircle, bar: 'bg-amber-500',   label: 'Attention' };
+        case 'warning':   return { pill: 'bg-rose-50 text-rose-800 border-rose-300',          icon: ICONS.alertSm,    bar: 'bg-rose-600',    label: 'Warning' };
+        default:          return { pill: 'bg-slate-100 text-slate-700 border-slate-300',      icon: ICONS.minus,      bar: 'bg-slate-400',   label: 'Neutral' };
+      }
+    }
+
+    function renderHealthBar(d) {
+      const gapStatus = !d.hasDemand ? 'neutral' : (d.staffingGapCount === 0 ? 'good' : 'warning');
+      const gapVal = !d.hasDemand ? '–' : `${d.staffingGapCount} ${d.staffingGapCount === 1 ? 'gap' : 'gaps'}`;
+      const gapSub = !d.hasDemand ? 'Import CSV to evaluate' : 'Busy hours with 0 staff';
+
+      const hlStatus = d.hourLimitWarnings === 0 ? 'good' : 'warning';
+      const hlVal = `${d.hourLimitWarnings} staff`;
+      const hlSub = d.hourLimitWarnings === 0 ? 'All within weekly limits' : 'Click to highlight over-limit staff';
+
+      let covStatus = 'neutral';
+      if (d.demandCoverage !== null) {
+        if (d.demandCoverage >= 0.90) covStatus = 'good';
+        else if (d.demandCoverage >= 0.75) covStatus = 'attention';
+        else covStatus = 'warning';
+      }
+      const covVal = d.demandCoverage === null ? '–' : `${(d.demandCoverage * 100).toFixed(1)}%`;
+      const covSub = d.demandCoverage === null ? 'No demand loaded' : 'Hourly demand met · ≥90% Good';
+
+      let jainStatus = 'neutral';
+      if (d.jain !== null) {
+        if (d.jain >= 0.90) jainStatus = 'good';
+        else if (d.jain >= 0.80) jainStatus = 'attention';
+        else jainStatus = 'warning';
+      }
+      const jainVal = d.jain === null ? '–' : `${Math.round(d.jain * 100)}%`;
+      const jainSub = d.jain === null
+        ? 'No hours assigned yet'
+        : (d.eligibleCount === 1 ? '1 eligible staff — no comparison' : `Team balance · Jain ${d.jain.toFixed(2)}`);
+
+      const cards = [
+        { title: 'Staffing Gaps',       value: gapVal,  sub: gapSub,  st: stripTone(gapStatus),  pct: null, tip: 'Operating hours with transactions > 0 and 0 staff. Click to inspect Hourly Summary.', action: d.hasDemand ? `setActiveTab('summary')` : '' },
+        { title: 'Hour Limit Warnings', value: hlVal,   sub: hlSub,   st: stripTone(hlStatus),   pct: null, tip: 'Staff exceeding their max weekly hours. Click to highlight.', action: d.hourLimitWarnings > 0 ? `highlightFirstOverLimit()` : '' },
+        { title: 'Demand Coverage',     value: covVal,  sub: covSub,  st: stripTone(covStatus),  pct: d.demandCoverage !== null ? Math.round(d.demandCoverage * 100) : null, tip: 'Share of hourly staffing demand covered (≥90% Good, 75–<90% Attention, <75% Warning). Click to view Hourly Summary.', action: d.hasDemand ? `setActiveTab('summary')` : '' },
+        { title: 'Hour Fairness',       value: jainVal, sub: jainSub, st: stripTone(jainStatus), pct: d.jain !== null ? Math.round(d.jain * 100) : null, tip: 'Jain Fairness Index (0.00–1.00) measuring how evenly weekly hour caps are utilized across eligible staff.', action: '' },
+      ];
+
+      document.getElementById('health-bar-grid').innerHTML = cards.map(c => {
+        const hover = c.action ? 'cursor-pointer hover:bg-slate-50 transition' : '';
+        const click = c.action ? `onclick="${c.action}"` : '';
+        return `
+          <div ${click} title="${c.tip}" class="px-4 py-3 flex flex-col justify-between ${hover}">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs font-semibold text-slate-700">${c.title}</span>
+              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${c.st.pill}">
+                <span class="shrink-0" aria-hidden="true">${c.st.icon}</span>
+                ${c.st.label}
+              </span>
+            </div>
+            <div class="mt-1.5 flex items-baseline gap-2.5">
+              <span class="text-xl font-bold text-slate-900 tracking-tight tabular-nums">${c.value}</span>
+              ${c.pct !== null ? `
+                <div class="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden max-w-[96px]">
+                  <div class="h-full ${c.st.bar} rounded-full transition-all" style="width:${c.pct}%"></div>
+                </div>` : ''}
+            </div>
+            <div class="text-[11px] font-medium text-slate-600 mt-1 truncate">${c.sub}</div>
+          </div>`;
+      }).join('');
+    }
+
+    function renderContextualBanner() {
+      const slot = document.getElementById('contextual-banner-slot');
+      if (state.bannerDemo === 'none' || state.bannerDemo === 'empty_onboarding') {
+        slot.className = 'hidden';
+        state.conflictAssignmentIds.clear();
+        return;
+      }
+
+      slot.className = 'block';
+      if (state.bannerDemo === 'auto_success') {
+        state.conflictAssignmentIds.clear();
+        const rev = state.autoReview || {
+          beforeCoverage: '78.4%', afterCoverage: '90.6%',
+          beforeGaps: 4, afterGaps: 0,
+          createdCount: 29, keptPinnedCount: 4, totalHours: 264,
+        };
+        slot.innerHTML = `
+          <div class="rounded-xl bg-indigo-50 border border-indigo-300 px-4 py-3 text-xs text-indigo-950 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-start gap-2.5">
+              <span class="text-indigo-700 mt-0.5">${ICONS.sparkles}</span>
+              <div>
+                <div class="font-semibold flex flex-wrap items-center gap-2">
+                  <span>Auto-schedule draft ready — ${rev.createdCount} new shifts, ${rev.keptPinnedCount} pinned kept (${rev.totalHours}h total).</span>
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white border border-indigo-200 text-indigo-900 text-[11px] font-bold tabular-nums">
+                    Coverage ${rev.beforeCoverage} → ${rev.afterCoverage}
+                  </span>
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white border border-indigo-200 text-indigo-900 text-[11px] font-bold tabular-nums">
+                    Gaps ${rev.beforeGaps} → ${rev.afterGaps}
+                  </span>
+                </div>
+                <div class="text-indigo-900 mt-0.5">Newly generated shifts are tagged <span class="px-1 py-0.2 rounded bg-sky-100 border border-sky-300 text-sky-900 text-[10px] font-bold">New</span> below. Pin any shifts you want to keep, or undo to revert.</div>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              ${state.undoStack.length > 0 ? `
+                <button onclick="undoAutoSchedule()" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-indigo-300 bg-white hover:bg-indigo-100 text-indigo-900 font-semibold transition">
+                  ${ICONS.undo} Undo Auto-schedule
+                </button>` : ''}
+              <button onclick="dismissAutoReview()" class="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold transition">
+                Keep draft
+              </button>
+            </div>
+          </div>`;
+      } else if (state.bannerDemo === 'pin_conflict') {
+        slot.innerHTML = `
+          <div class="rounded-xl bg-rose-50 border border-rose-300 px-4 py-3 text-xs text-rose-950 flex items-start justify-between gap-3">
+            <div class="flex items-start gap-2.5">
+              <span class="text-rose-700 mt-0.5">${ICONS.alert}</span>
+              <div>
+                <div class="font-semibold">Auto-schedule paused: Pinned shifts have a conflict (no changes were made).</div>
+                <p class="text-rose-900 mt-0.5"><strong>Alice Nguyen</strong> has pinned shifts that overlap or exceed her weekly hour limit.</p>
+                <button onclick="highlightPinConflicts()" class="mt-2 px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-semibold transition">
+                  Highlight conflicting shifts
+                </button>
+              </div>
+            </div>
+            <button onclick="setBannerDemo('none')" class="text-rose-700 hover:text-rose-950 p-0.5">${ICONS.x}</button>
+          </div>`;
+      } else if (state.bannerDemo === 'csv_error') {
+        state.conflictAssignmentIds.clear();
+        slot.innerHTML = `
+          <div class="rounded-xl bg-rose-50 border border-rose-300 px-4 py-3 text-xs text-rose-950 flex items-start justify-between gap-3">
+            <div class="flex items-start gap-2.5">
+              <span class="text-rose-700 mt-0.5">${ICONS.alert}</span>
+              <div>
+                <div class="font-semibold">CSV Import failed — your previous demand data is unchanged.</div>
+                <div class="text-rose-900 mt-0.5">Row 6, Column 4 (Wed, 11am): expected a whole number (0 or more), got "-12".</div>
+              </div>
+            </div>
+            <button onclick="setBannerDemo('none')" class="text-rose-700 hover:text-rose-950 p-0.5">${ICONS.x}</button>
+          </div>`;
+      }
+    }
+
+    function renderAutoScheduleButton() {
+      const btn = document.getElementById('btn-auto-schedule');
+      if (state.bannerDemo === 'empty_onboarding') {
+        btn.disabled = true;
+        btn.className = 'inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-slate-200 text-slate-600 text-xs font-semibold cursor-not-allowed';
+        btn.title = 'Missing inputs: Import CSV transactions and add at least 1 staff member with weekly hours > 0';
+      } else {
+        btn.disabled = false;
+        btn.className = 'inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-semibold shadow-sm shadow-indigo-700/20 transition';
+        btn.title = 'Generate a balanced draft schedule while keeping pinned shifts';
+      }
+    }
+
+    function renderRoster(derived) {
+      const onboarding = document.getElementById('roster-empty-onboarding');
+      const gridWrap = document.getElementById('roster-grid-container');
+
+      if (state.bannerDemo === 'empty_onboarding') {
+        onboarding.classList.remove('hidden');
+        gridWrap.classList.add('hidden');
+        return;
+      }
+      onboarding.classList.add('hidden');
+      gridWrap.classList.remove('hidden');
+
+      const sortedShifts = [...state.shifts].sort((a, b) => a.startHour - b.startHour);
+
+      let html = `
+        <table class="w-full border-collapse table-fixed text-xs">
+          <thead class="sticky top-0 z-20 shadow-[0_1px_0_rgba(203,213,225,0.9)]">
+            <tr class="border-b border-slate-300/80 bg-slate-100">
+              <th class="w-36 text-left px-4 py-2.5 font-bold text-slate-700 border-r border-slate-200 align-top sticky left-0 z-30 bg-slate-100">Shift</th>
+              ${DAYS.map((day, idx) => {
+                const isWeekend = idx >= 5;
+                const ds = derived.dayStats[idx];
+                const isJumpDay = state.jumpFocus && state.jumpFocus.day === idx;
+                let dayBadge = `<span class="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">${ICONS.check} Covered</span>`;
+                if (ds.gaps > 0) {
+                  dayBadge = `<span class="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-50 text-rose-800 border border-rose-300" title="${ds.gaps} busy hour(s) with 0 staff">${ICONS.alertSm} ${ds.gaps} ${ds.gaps === 1 ? 'gap' : 'gaps'}</span>`;
+                } else if (ds.maxPeakNeed >= 2 || ds.shortageHours >= 6) {
+                  dayBadge = `<span class="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-900 border border-amber-300" title="High peak demand: need ${ds.shortageHours} more staff-hour(s) across the day">Need ${ds.shortageHours}h</span>`;
+                } else if (ds.shortageHours > 0) {
+                  dayBadge = `<span class="inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-white text-slate-700 border border-slate-300/80" title="Minor peak demand: need ${ds.shortageHours} more staff-hour(s) across the day">Need ${ds.shortageHours}h</span>`;
+                }
+                return `
+                  <th class="px-1.5 py-2.5 text-center font-bold border-r last:border-r-0 border-slate-200 align-top ${isJumpDay ? 'bg-indigo-100 text-indigo-950' : (isWeekend ? 'bg-slate-200/80 text-slate-900' : 'bg-slate-100 text-slate-800')}">
+                    <div>${day}</div>
+                    ${derived.hasDemand ? dayBadge : ''}
+                  </th>`;
+              }).join('')}
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-200">
+      `;
+
+      for (const sh of sortedShifts) {
+        const dur = sh.endHour - sh.startHour;
+        html += `<tr>
+          <td class="px-4 py-3 align-top border-r border-slate-200 bg-slate-50 sticky left-0 z-10">
+            <div class="font-bold text-slate-900 tabular-nums">${formatHour(sh.startHour)} – ${formatHour(sh.endHour)}</div>
+            <div class="text-[11px] font-medium text-slate-600 mt-0.5">${dur}h shift</div>
+            <div class="mt-2.5 flex items-center gap-2 text-[11px] text-slate-600">
+              <button onclick="openModal('shifts')" class="hover:text-indigo-700 font-semibold transition">Edit</button>
+              <span class="text-slate-300">·</span>
+              <button onclick="openModal('delete')" class="hover:text-rose-700 font-semibold transition">Delete</button>
+            </div>
+          </td>`;
+
+        for (let d = 0; d < 7; d++) {
+          const isWeekend = d >= 5;
+          const cellAsgns = state.assignments.filter(a => a.day === d && a.shiftId === sh.id);
+          const hint = derived.shiftCellHints[`${sh.id}-${d}`];
+          const isJumpCell = state.jumpFocus && state.jumpFocus.day === d && state.jumpFocus.shiftIds.includes(sh.id);
+
+          html += `<td class="roster-cell p-2 align-top border-r last:border-r-0 border-slate-200 ${isWeekend ? 'bg-slate-100/60' : 'bg-white'} ${isJumpCell ? 'cell-jump-focus' : ''}">
+            <div class="flex flex-col gap-1.5 min-h-[90px]">`;
+
+          for (const a of cellAsgns) {
+            const st = state.staff.find(s => s.id === a.staffId);
+            if (!st) continue;
+            const warns = derived.assignmentWarnings.get(a.id) || [];
+            const m = derived.staffMetrics.get(st.id);
+            const isOverLimit = m.overHours > 0;
+            const isHighlighted = state.highlightedStaffId === st.id;
+            const isConflict = state.conflictAssignmentIds.has(a.id);
+            const isAiNew = state.autoReview && state.autoReview.newIds && state.autoReview.newIds.has(a.id);
+
+            // Distinct Layer 3 surface — chips pop cleanly off the white/slate grid!
+            let accentClass = 'border-l-slate-600 bg-slate-100/90 border-slate-300/90 hover:bg-slate-200/70 hover:border-slate-400';
+            if (isAiNew) accentClass = 'border-l-sky-600 bg-sky-50 border-sky-300 hover:bg-sky-100/70 hover:border-sky-400';
+            if (a.isPinned) accentClass = 'border-l-indigo-600 bg-indigo-50 border-indigo-300 hover:bg-indigo-100/70 hover:border-indigo-400';
+            if (warns.length > 0) accentClass = 'border-l-amber-600 bg-amber-50 border-amber-300 hover:bg-amber-100/70';
+            if (isHighlighted) accentClass += ' chip-highlight';
+            if (isConflict) accentClass += ' chip-conflict-pulse';
+
+            const parts = st.name.split(' ');
+            const shortName = parts.length > 1 ? `${parts[0]} ${parts[1][0]}.` : st.name;
+
+            html += `
+              <div class="group flex items-center gap-1 pl-1.5 pr-1 py-1.5 rounded-lg border border-l-[3px] shadow-[0_1px_2px_rgba(15,23,42,0.05)] transition ${accentClass}">
+                <span class="w-5 h-5 rounded-full text-[9px] font-bold flex items-center justify-center shrink-0 ${getAvatarClass(st.id)}">
+                  ${getInitials(st.name)}
+                </span>
+                <button
+                  onclick="openGuidancePopover(event, 'reassign', ${d}, '${sh.id}', '${a.id}')"
+                  title="${st.name} (${m.assignedHours}/${st.maxWeeklyHours}h)${a.isPinned ? ' · Pinned' : ''}${isOverLimit ? ` · Over weekly cap (+${m.overHours}h)` : ''} — Click to reassign"
+                  class="flex-1 text-left text-[11px] font-semibold text-slate-900 truncate hover:text-indigo-800 transition"
+                >${shortName}</button>
+                ${isAiNew ? `<span title="Newly generated by Auto-schedule" class="px-1 py-0.2 rounded bg-sky-100 border border-sky-300 text-sky-900 text-[9px] font-bold shrink-0">New</span>` : ''}
+                ${isOverLimit ? `<span title="Over weekly hour limit (+${m.overHours}h)" class="px-1 py-0.2 rounded bg-rose-100 border border-rose-300 text-rose-800 text-[9px] font-bold shrink-0 cursor-help">OT</span>` : ''}
+                ${warns.length > 0 ? `<span title="${warns.join(' • ')}" class="text-amber-700 shrink-0 cursor-help">${ICONS.alertSm}</span>` : ''}
+                <button
+                  onclick="togglePin('${a.id}')"
+                  title="${a.isPinned ? 'Pinned — click to unpin' : 'Pin this shift'}"
+                  class="shrink-0 p-0.5 rounded transition ${a.isPinned ? 'text-indigo-700 opacity-100' : 'text-slate-600 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 hover:text-indigo-700'}"
+                >${a.isPinned ? ICONS.pinFilled : ICONS.pin}</button>
+                <button
+                  onclick="removeAssignment('${a.id}')"
+                  title="Remove from shift"
+                  class="shrink-0 p-0.5 rounded text-slate-600 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 hover:text-rose-700 hover:bg-rose-100 transition"
+                >${ICONS.xSm}</button>
+              </div>`;
+          }
+
+          // Severity-tiered "+ Add" (readable contrast on every state)
+          let addBtnClass = 'quiet-add border-slate-300/80 border-dashed hover:border-indigo-400 hover:bg-indigo-50/60 text-slate-600 hover:text-indigo-800';
+          let addBtnLabel = `${ICONS.plusSm} <span>Add</span>`;
+          let addBtnTip = `Assign staff to ${DAYS[d]} ${formatHour(sh.startHour)}–${formatHour(sh.endHour)}`;
+
+          if (hint && hint.gapHours.length > 0) {
+            addBtnClass = 'border-rose-300 bg-rose-50 hover:bg-rose-100 text-rose-800 font-semibold';
+            addBtnLabel = `${ICONS.alertSm} <span>Gap · Add</span>`;
+            addBtnTip = `No staff scheduled at: ${hint.gapHours.join(', ')}`;
+          } else if (hint && hint.maxNeed >= 2) {
+            addBtnClass = 'border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 font-semibold';
+            addBtnLabel = `${ICONS.plusSm} <span>Add (need ${hint.maxNeed})</span>`;
+            addBtnTip = `High peak demand — need ${hint.maxNeed} more staff at: ${hint.shortHours.join(', ')}`;
+          } else if (hint && hint.maxNeed === 1) {
+            addBtnClass = 'quiet-add border-slate-300/90 border-dashed hover:border-amber-400 hover:bg-amber-50/70 text-slate-700 hover:text-amber-900';
+            addBtnLabel = `${ICONS.plusSm} <span>Add</span> <span class="text-amber-800 font-semibold">(need 1)</span>`;
+            addBtnTip = `Minor peak demand — need 1 more staff at: ${hint.shortHours.join(', ')}`;
+          }
+
+          html += `
+              <button
+                onclick="openGuidancePopover(event, 'assign', ${d}, '${sh.id}')"
+                title="${addBtnTip}"
+                class="mt-auto w-full py-1 px-1.5 rounded-lg border text-[11px] font-medium transition flex items-center justify-center gap-1 ${addBtnClass}"
+              >${addBtnLabel}</button>
+            </div>
+          </td>`;
+        }
+        html += `</tr>`;
+      }
+
+      html += `</tbody></table>`;
+      gridWrap.innerHTML = html;
+
+      const ind = document.getElementById('highlight-indicator');
+      if (state.highlightedStaffId) {
+        const st = state.staff.find(s => s.id === state.highlightedStaffId);
+        document.getElementById('highlight-name').textContent = st ? st.name : '';
+        ind.classList.remove('hidden');
+      } else {
+        ind.classList.add('hidden');
+      }
+
+      const jumpInd = document.getElementById('jump-focus-indicator');
+      if (state.jumpFocus) {
+        const jf = state.jumpFocus;
+        document.getElementById('jump-focus-label').textContent =
+          `Focused: ${DAYS[jf.day]} ${formatHour(jf.hour)} · ${jf.shiftIds.length} ${jf.shiftIds.length === 1 ? 'shift' : 'shifts'}`;
+        jumpInd.classList.remove('hidden');
+      } else {
+        jumpInd.classList.add('hidden');
+      }
+    }
+
+    function renderSummary(d) {
+      const kpis = [
+        { label: 'Total Transactions', value: d.hasDemand ? d.totalTransactions.toLocaleString() : '–', sub: 'Weekly customer transactions' },
+        { label: 'Total Staff Hours', value: `${d.totalStaffHours}h`, sub: 'Total scheduled staff-hours' },
+        { label: 'Overall Txns / Staff Hr', value: d.overallRate === null ? '–' : d.overallRate.toFixed(1), sub: 'Total Txns ÷ Total Staff Hrs' },
+        { label: 'Average Txns / Staff Hr', value: d.avgRate === null ? '–' : d.avgRate.toFixed(1), sub: 'Avg per active hour' },
+      ];
+
+      document.getElementById('summary-kpis').innerHTML = kpis.map(k => `
+        <div class="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3">
+          <div class="text-[11px] font-semibold text-slate-700">${k.label}</div>
+          <div class="text-lg font-bold text-slate-900 tabular-nums mt-0.5">${k.value}</div>
+          <div class="text-[11px] font-medium text-slate-600 mt-0.5">${k.sub}</div>
+        </div>
+      `).join('');
+
+      const legendEl = document.getElementById('summary-legend');
+      if (state.summaryMode === 'metrics') {
+        legendEl.innerHTML = `
+          <div class="flex flex-wrap items-center gap-4">
+            <span class="font-semibold text-slate-700">Key:</span>
+            <span class="inline-flex items-center gap-1.5"><span class="px-1.5 py-0.5 rounded bg-rose-50 border border-rose-300 text-rose-800 font-semibold">– (Gap)</span> Busy hour with 0 staff</span>
+            <span class="inline-flex items-center gap-1.5"><span class="px-1.5 py-0.5 rounded bg-amber-50 border border-amber-300 text-amber-900 font-semibold">↑ High</span> Above target rate</span>
+            <span class="inline-flex items-center gap-1.5"><span class="px-1.5 py-0.5 rounded bg-white border border-slate-300 text-slate-700 font-medium">–</span> No demand &amp; 0 staff</span>
+          </div>
+          <span class="text-indigo-700 font-semibold">Tip: Click any Gap or High cell to fix on Roster</span>`;
+      } else {
+        legendEl.innerHTML = `
+          <div class="flex flex-wrap items-center gap-3">
+            <span class="font-semibold text-slate-700">Key:</span>
+            <span class="inline-flex items-center gap-1"><span class="px-1.5 py-0.5 rounded bg-rose-100 border border-rose-300 text-rose-900 font-bold">⚠ Gap</span> 0 staff</span>
+            <span class="inline-flex items-center gap-1"><span class="px-1.5 py-0.5 rounded bg-rose-50 border border-rose-300 text-rose-800 font-semibold">▼ -2+</span> Need 2+</span>
+            <span class="inline-flex items-center gap-1"><span class="px-1.5 py-0.5 rounded bg-amber-50 border border-amber-300 text-amber-900 font-semibold">▼ -1</span> Need 1</span>
+            <span class="inline-flex items-center gap-1"><span class="px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-300 text-emerald-800 font-semibold">✓ 0</span> On target</span>
+            <span class="inline-flex items-center gap-1"><span class="px-1.5 py-0.5 rounded bg-sky-50 border border-sky-300 text-sky-800 font-semibold">▲ +X</span> Overstaffed</span>
+          </div>
+          <span class="text-indigo-700 font-semibold">Tip: Click any Gap or Need cell to fix on Roster</span>`;
+      }
+
+      let html = `
+        <table class="w-full border-collapse text-xs tabular-nums">
+          <thead class="sticky top-0 z-10 bg-slate-100 border-b border-slate-300">
+            <tr>
+              <th class="w-20 px-3 py-2 text-left font-bold text-slate-800 border-r border-slate-200 sticky left-0 bg-slate-100">Hour</th>
+              ${DAYS.map((day, idx) => `<th class="px-2 py-2 text-center font-bold border-r last:border-r-0 border-slate-200 ${idx >= 5 ? 'bg-slate-200/60 text-slate-900' : 'text-slate-800'}">${day}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-200">
+      `;
+
+      for (const h of HOURS) {
+        html += `<tr>
+          <td class="px-3 py-2 font-bold text-slate-800 bg-slate-100/90 border-r border-slate-200 sticky left-0">${formatHour(h)}</td>`;
+
+        for (let day = 0; day < 7; day++) {
+          const cell = d.grid[`${day}-${h}`];
+
+          if (state.summaryMode === 'metrics') {
+            let bg = day >= 5 ? 'bg-slate-50/70' : 'bg-white';
+            let line3 = `<span class="font-bold text-slate-900">${cell.rate !== null ? cell.rate.toFixed(1) + '/h' : '–'}</span>`;
+            const actionable = cell.isGap || cell.isHighLoad;
+
+            if (cell.isGap) {
+              bg = 'bg-rose-50 hover:bg-rose-100 cursor-pointer';
+              line3 = `<span class="font-bold text-rose-800">– (Gap)</span>`;
+            } else if (cell.txns === 0 && cell.staffCount === 0) {
+              bg = 'bg-slate-100/70 text-slate-600';
+              line3 = `<span class="text-slate-600">–</span>`;
+            } else if (cell.isHighLoad) {
+              bg = 'bg-amber-50 hover:bg-amber-100 cursor-pointer';
+              line3 = `<span class="font-bold text-amber-900">↑ ${cell.rate.toFixed(1)}/h</span>`;
+            }
+
+            const clickAttr = actionable
+              ? `onclick="jumpToRosterFromSummary(${day}, ${h})" title="Click to jump to ${DAYS[day]} ${formatHour(h)} on Weekly Roster"`
+              : '';
+
+            html += `
+              <td ${clickAttr} class="px-2 py-1.5 text-center border-r last:border-r-0 border-slate-200 transition ${bg}">
+                <div class="text-[11px] font-medium text-slate-800 leading-tight">${cell.txns} txns</div>
+                <div class="text-[11px] text-slate-600 leading-tight">${cell.staffCount} staff</div>
+                <div class="text-xs leading-tight mt-0.5">${line3}</div>
+              </td>`;
+          } else {
+            let bg = 'bg-emerald-50/70';
+            let deltaBadge = `<span class="font-bold text-emerald-800">✓ 0</span>`;
+            const actionable = cell.isGap || cell.delta < 0;
+            if (cell.isGap) {
+              bg = 'bg-rose-100 hover:bg-rose-200/80 cursor-pointer';
+              deltaBadge = `<span class="font-bold text-rose-900">⚠ Gap (${cell.delta})</span>`;
+            } else if (cell.delta <= -2) {
+              bg = 'bg-rose-50 hover:bg-rose-100 cursor-pointer';
+              deltaBadge = `<span class="font-bold text-rose-800">▼ ${cell.delta}</span>`;
+            } else if (cell.delta === -1) {
+              bg = 'bg-amber-50 hover:bg-amber-100 cursor-pointer';
+              deltaBadge = `<span class="font-bold text-amber-900">▼ -1</span>`;
+            } else if (cell.delta > 0) {
+              bg = 'bg-sky-50';
+              deltaBadge = `<span class="font-bold text-sky-800">▲ +${cell.delta}</span>`;
+            } else if (cell.required === 0 && cell.staffCount === 0) {
+              bg = 'bg-slate-100/70 text-slate-600';
+              deltaBadge = `<span class="text-slate-600">–</span>`;
+            }
+
+            const clickAttr = actionable
+              ? `onclick="jumpToRosterFromSummary(${day}, ${h})" title="${cell.isGap ? 'Staffing Gap (0 staff)' : `Need ${Math.abs(cell.delta)} more staff`} — click to jump to ${DAYS[day]} ${formatHour(h)} on Weekly Roster"`
+              : '';
+
+            html += `
+              <td ${clickAttr} class="px-2 py-2 text-center border-r last:border-r-0 border-slate-200 transition ${bg}">
+                <div class="text-[11px] font-medium text-slate-700 leading-tight">${cell.staffCount} / ${cell.required} needed</div>
+                <div class="text-xs leading-tight mt-0.5">${deltaBadge}</div>
+              </td>`;
+          }
+        }
+        html += `</tr>`;
+      }
+
+      html += `</tbody></table>`;
+      document.getElementById('summary-table-container').innerHTML = html;
+    }
+
+    function renderStaffPanel(d) {
+      document.getElementById('staff-panel-totals').innerHTML =
+        `<span class="tabular-nums">Assigned <strong class="text-slate-900">${d.totalAssignedStaffHours}h</strong> of <strong class="text-slate-900">${d.totalCapacity}h</strong> capacity</span>`;
+
+      const underCount = state.staff.filter(s => d.staffMetrics.get(s.id).assignedHours < s.maxWeeklyHours).length;
+      const overCount = state.staff.filter(s => d.staffMetrics.get(s.id).assignedHours > s.maxWeeklyHours).length;
+      const pills = [
+        { key: 'all',   label: `All (${state.staff.length})` },
+        { key: 'under', label: `Under cap (${underCount})` },
+        { key: 'over',  label: `Over limit (${overCount})` },
+      ];
+      document.getElementById('staff-filter-pills').innerHTML = pills.map(p => {
+        const active = state.staffFilter === p.key;
+        const cls = active
+          ? 'bg-slate-900 text-white border-slate-900'
+          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100';
+        return `<button onclick="setStaffFilter('${p.key}')" class="px-2 py-0.5 rounded-full border font-semibold transition ${cls}">${p.label}</button>`;
+      }).join('');
+
+      document.getElementById('btn-staff-sort').textContent = state.staffSort === 'name' ? 'Sort: Name' : 'Sort: Hrs left';
+
+      const q = state.staffSearch.trim().toLowerCase();
+      let visibleStaff = state.staff.filter(st => {
+        const m = d.staffMetrics.get(st.id);
+        if (q && !st.name.toLowerCase().includes(q)) return false;
+        if (state.staffFilter === 'under' && !(m.assignedHours < st.maxWeeklyHours)) return false;
+        if (state.staffFilter === 'over' && !(m.assignedHours > st.maxWeeklyHours)) return false;
+        return true;
+      });
+      if (state.staffSort === 'remaining') {
+        visibleStaff = [...visibleStaff].sort((a, b) => {
+          const remA = a.maxWeeklyHours - d.staffMetrics.get(a.id).assignedHours;
+          const remB = b.maxWeeklyHours - d.staffMetrics.get(b.id).assignedHours;
+          return remB - remA || a.name.localeCompare(b.name);
+        });
+      }
+
+      if (visibleStaff.length === 0) {
+        document.getElementById('staff-list-container').innerHTML =
+          `<div class="px-4 py-8 text-center text-xs text-slate-600">No team members match this filter.</div>`;
+        return;
+      }
+
+      document.getElementById('staff-list-container').innerHTML = visibleStaff.map(st => {
+        const m = d.staffMetrics.get(st.id);
+        const pct = st.maxWeeklyHours > 0 ? Math.min(100, (m.assignedHours / st.maxWeeklyHours) * 100) : 0;
+        const isOver = m.assignedHours > st.maxWeeklyHours;
+        const isAtCap = m.assignedHours === st.maxWeeklyHours && st.maxWeeklyHours > 0;
+        const isSelected = state.highlightedStaffId === st.id;
+
+        const barColor = isOver ? 'bg-rose-600' : (isAtCap ? 'bg-emerald-600' : 'bg-indigo-600');
+        const hasLocalWarn = m.multiDays.length > 0 || m.overlapDays.length > 0;
+        const localWarnTip = [
+          m.multiDays.length ? `2+ shifts on: ${m.multiDays.join(', ')}` : '',
+          m.overlapDays.length ? `Overlap on: ${m.overlapDays.join(', ')}` : '',
+        ].filter(Boolean).join(' • ');
+
+        return `
+          <div class="group px-4 py-2.5 transition ${isSelected ? 'bg-indigo-50' : 'hover:bg-slate-50'}">
+            <div class="flex items-center justify-between gap-2">
+              <button
+                onclick="toggleStaffHighlight('${st.id}')"
+                class="flex items-center gap-2 min-w-0 text-left"
+              >
+                <span class="w-6 h-6 rounded-full text-[10px] font-bold flex items-center justify-center shrink-0 ${getAvatarClass(st.id)}">
+                  ${getInitials(st.name)}
+                </span>
+                <span class="text-xs font-semibold truncate ${isSelected ? 'text-indigo-800' : 'text-slate-900 group-hover:text-indigo-700'}">${st.name}</span>
+              </button>
+              <div class="flex items-center gap-1 shrink-0">
+                ${hasLocalWarn ? `<span title="${localWarnTip}" class="text-amber-700 cursor-help">${ICONS.alertSm}</span>` : ''}
+                ${isOver ? `<span class="px-1.5 py-0.5 rounded-full bg-rose-100 border border-rose-300 text-rose-800 text-[10px] font-bold">+${m.overHours}h</span>` : ''}
+                ${isAtCap ? `<span class="px-1.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-semibold">At cap</span>` : ''}
+                <button onclick="openModal('staff')" title="Edit staff" class="p-1 rounded-md text-slate-600 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 hover:text-slate-900 hover:bg-slate-200 transition">${ICONS.edit}</button>
+                <button onclick="openModal('delete')" title="Delete staff" class="p-1 rounded-md text-slate-600 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 hover:text-rose-700 hover:bg-rose-100 transition">${ICONS.trash}</button>
+              </div>
+            </div>
+            <div class="mt-2 pl-8 flex items-center gap-2.5">
+              <div class="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden">
+                <div class="h-full ${barColor} rounded-full transition-all" style="width:${pct}%"></div>
+              </div>
+              <span class="text-[11px] tabular-nums font-semibold ${isOver ? 'text-rose-800' : 'text-slate-700'}">
+                ${m.assignedHours}/${st.maxWeeklyHours}h
+              </span>
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    function renderPopoverListBody() {
+      const bodyEl = document.getElementById('popover-list-body');
+      if (!state.popover || !bodyEl) return;
+      const { day, shiftId, assignmentId, pendingStaffId, query = '' } = state.popover;
+      const q = query.trim().toLowerCase();
+      const raw = getGuidanceCandidates(day, shiftId, assignmentId);
+      const eligible = q ? raw.eligible.filter(c => c.staff.name.toLowerCase().includes(q)) : raw.eligible;
+      const requiresAttention = q ? raw.requiresAttention.filter(c => c.staff.name.toLowerCase().includes(q)) : raw.requiresAttention;
+
+      let html = `<div class="p-3">
+        <div class="text-[10px] font-bold uppercase tracking-wider text-emerald-800 mb-2 flex items-center justify-between">
+          <span>Eligible (${eligible.length})</span>
+          <span class="font-medium normal-case text-slate-600">${eligible.length > 0 ? 'Click or Enter' : '1-click assign'}</span>
+        </div>`;
+
+      if (eligible.length === 0) {
+        const derivedNow = computeDerived();
+        const teamAtFullCap = derivedNow.totalCapacity > 0 && derivedNow.totalAssignedStaffHours >= derivedNow.totalCapacity;
+        html += q
+          ? `<div class="text-[11px] text-slate-600 py-1">No eligible staff match "${query}".</div>`
+          : (teamAtFullCap
+            ? `<div class="rounded-lg bg-slate-100 border border-slate-300 px-3 py-2 text-[11px] text-slate-800 leading-relaxed">
+                 <strong class="text-slate-900">Team is at 100% weekly capacity</strong> (${derivedNow.totalAssignedStaffHours}/${derivedNow.totalCapacity}h). Assigning anyone below will trigger an overtime warning — or consider adjusting shift hours / adding staff.
+               </div>`
+            : `<div class="text-[11px] text-slate-600 py-1">No staff can take this shift without a warning.</div>`);
+      } else {
+        html += `<div class="space-y-1">` + eligible.map((c, i) => `
+          <button
+            onclick="commitAssignment('${c.staff.id}')"
+            class="w-full text-left px-2.5 py-2 rounded-lg hover:bg-emerald-50 border ${i === 0 && q ? 'border-emerald-300 bg-emerald-50/70' : 'border-transparent'} hover:border-emerald-200 transition flex items-center justify-between gap-2"
+          >
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="w-6 h-6 rounded-full text-[10px] font-bold flex items-center justify-center shrink-0 ${getAvatarClass(c.staff.id)}">${getInitials(c.staff.name)}</span>
+              <div class="min-w-0">
+                <div class="text-xs font-semibold text-slate-900 truncate">${c.staff.name}</div>
+                <div class="text-[11px] text-slate-600">${c.currentHours}/${c.staff.maxWeeklyHours}h · ${c.remainingAfter}h left</div>
+              </div>
+            </div>
+            <span class="text-[11px] font-bold text-emerald-800 shrink-0">${i === 0 && q ? '↵ Enter' : 'Select'}</span>
+          </button>
+        `).join('') + `</div>`;
+      }
+      html += `</div>`;
+
+      html += `<div class="p-3 bg-slate-50">
+        <div class="text-[10px] font-bold uppercase tracking-wider text-amber-900 mb-2">
+          Requires attention (${requiresAttention.length})
+        </div>`;
+
+      if (requiresAttention.length === 0) {
+        html += `<div class="text-[11px] text-slate-600 py-1">${q ? `No matches for "${query}".` : 'None.'}</div>`;
+      } else {
+        html += `<div class="space-y-1.5">` + requiresAttention.map(c => {
+          const isPending = pendingStaffId === c.staff.id;
+          return `
+            <div class="rounded-lg border ${isPending ? 'border-amber-400 bg-amber-50' : 'border-slate-300/80 bg-white'} p-2.5 transition">
+              <button onclick="requestSoftOverride('${c.staff.id}')" class="w-full text-left">
+                <div class="flex items-center justify-between gap-2">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="w-5 h-5 rounded-full text-[9px] font-bold flex items-center justify-center shrink-0 ${getAvatarClass(c.staff.id)}">${getInitials(c.staff.name)}</span>
+                    <span class="text-xs font-semibold text-slate-900 truncate">${c.staff.name}</span>
+                  </div>
+                  <span class="text-[11px] font-semibold text-slate-700 tabular-nums">${c.currentHours}/${c.staff.maxWeeklyHours}h</span>
+                </div>
+                <ul class="mt-1.5 pl-7 space-y-0.5 text-[11px] font-medium text-amber-900">
+                  ${c.reasons.map(r => `<li>• ${r}</li>`).join('')}
+                </ul>
+              </button>
+              ${isPending ? `
+                <div class="mt-2.5 pt-2 border-t border-amber-300 flex items-center justify-between gap-2">
+                  <span class="text-[11px] font-semibold text-amber-950">Assign with warning?</span>
+                  <div class="flex items-center gap-1.5">
+                    <button onclick="cancelSoftOverride()" class="px-2.5 py-1 rounded-md border border-slate-300 bg-white text-[11px] font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
+                    <button onclick="commitAssignment('${c.staff.id}')" class="px-2.5 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-semibold">Confirm</button>
+                  </div>
+                </div>
+              ` : ''}
+            </div>`;
+        }).join('') + `</div>`;
+      }
+      html += `</div>`;
+      bodyEl.innerHTML = html;
+    }
+
+    function renderPopover() {
+      const el = document.getElementById('guidance-popover');
+      if (!state.popover) {
+        el.classList.add('hidden');
+        return;
+      }
+
+      const { mode, day, shiftId, assignmentId, rect, query = '' } = state.popover;
+      const sh = getShift(shiftId);
+      const existing = assignmentId ? state.assignments.find(a => a.id === assignmentId) : null;
+      const existingStaff = existing ? state.staff.find(s => s.id === existing.staffId) : null;
+
+      const top = Math.min(window.innerHeight - 430, Math.max(56, rect.bottom + 6));
+      const left = Math.min(window.innerWidth - 336, Math.max(12, rect.left));
+      el.style.top = `${top}px`;
+      el.style.left = `${left}px`;
+      el.classList.remove('hidden');
+
+      let html = `
+        <div class="px-4 py-3 bg-slate-100 border-b border-slate-200 flex items-start justify-between gap-2">
+          <div>
+            <div class="text-xs font-bold text-slate-900">
+              ${mode === 'assign' ? 'Assign Staff' : `Reassign ${existingStaff?.name ?? ''}`}
+            </div>
+            <div class="text-[11px] font-medium text-slate-600 mt-0.5">${DAYS[day]} · ${formatHour(sh.startHour)}–${formatHour(sh.endHour)} (${sh.endHour - sh.startHour}h)</div>
+          </div>
+          <button onclick="closePopover()" class="text-slate-600 hover:text-slate-900 p-0.5 rounded">${ICONS.x}</button>
+        </div>
+        <div class="px-3 py-2 bg-white border-b border-slate-200">
+          <div class="relative">
+            <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none">${ICONS.search}</span>
+            <input
+              id="popover-search-input"
+              type="text"
+              value="${query}"
+              placeholder="Type name & press Enter…"
+              oninput="handlePopoverSearch(this.value)"
+              onkeydown="handlePopoverKeydown(event)"
+              class="w-full pl-8 pr-2.5 py-1.5 rounded-lg border border-slate-300 bg-slate-50 focus:bg-white text-xs font-medium text-slate-900 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
+            />
+          </div>
+        </div>
+      `;
+
+      if (mode === 'reassign' && existing?.isPinned) {
+        html += `
+          <div class="px-4 py-2 bg-indigo-50 border-b border-indigo-200 text-[11px] text-indigo-900 flex items-center gap-1.5">
+            <span class="text-indigo-700 shrink-0">${ICONS.pinFilled}</span>
+            <span>Replacing a pinned shift starts as <strong>Unpinned</strong>.</span>
+          </div>`;
+      }
+
+      html += `<div id="popover-list-body" class="max-h-72 overflow-y-auto divide-y divide-slate-200"></div>`;
+
+      if (mode === 'reassign' && existing) {
+        html += `
+          <div class="px-4 py-2.5 bg-slate-100 border-t border-slate-200 flex justify-between items-center">
+            <span class="text-[11px] font-medium text-slate-600">Or remove from shift</span>
+            <button onclick="removeAssignment('${existing.id}'); closePopover();" class="text-xs font-bold text-rose-700 hover:text-rose-800">
+              Remove ${existingStaff?.name.split(' ')[0]}
+            </button>
+          </div>`;
+      }
+
+      document.getElementById('popover-content').innerHTML = html;
+      renderPopoverListBody();
+      setTimeout(() => {
+        const inp = document.getElementById('popover-search-input');
+        if (inp) inp.focus();
+      }, 0);
+    }
+
+    function handlePopoverSearch(val) {
+      if (!state.popover) return;
+      state.popover.query = val;
+      renderPopoverListBody();
+    }
+
+    function handlePopoverKeydown(e) {
+      if (e.key === 'Enter' && state.popover) {
+        const { day, shiftId, assignmentId, query = '' } = state.popover;
+        const q = query.trim().toLowerCase();
+        const raw = getGuidanceCandidates(day, shiftId, assignmentId);
+        const matches = q ? raw.eligible.filter(c => c.staff.name.toLowerCase().includes(q)) : raw.eligible;
+        if (matches.length > 0) {
+          e.preventDefault();
+          commitAssignment(matches[0].staff.id);
+        }
+      }
+    }
+
+    // =========================================================================
+    // INTERACTIONS
+    // =========================================================================
+    function setScreen(s) { state.screen = s; closePopover(); render(); }
+    function setStorageMode(m) { state.storageMode = m; document.getElementById('ctrl-storage').value = m; render(); }
+    function setBannerDemo(b) { state.bannerDemo = b; document.getElementById('ctrl-banner').value = b; render(); }
+    function setActiveTab(t) {
+      state.activeTab = t;
+      closePopover();
+      document.getElementById('panel-roster').classList.toggle('hidden', t !== 'roster');
+      document.getElementById('panel-summary').classList.toggle('hidden', t !== 'summary');
+      document.getElementById('roster-toolbar').classList.toggle('hidden', t !== 'roster');
+      document.getElementById('summary-toolbar').classList.toggle('hidden', t !== 'summary');
+      document.getElementById('tab-roster').className = t === 'roster'
+        ? 'px-3 py-1.5 rounded-md text-xs font-semibold bg-white text-slate-900 shadow-xs transition'
+        : 'px-3 py-1.5 rounded-md text-xs font-semibold text-slate-600 hover:text-slate-900 transition';
+      document.getElementById('tab-summary').className = t === 'summary'
+        ? 'px-3 py-1.5 rounded-md text-xs font-semibold bg-white text-slate-900 shadow-xs transition'
+        : 'px-3 py-1.5 rounded-md text-xs font-semibold text-slate-600 hover:text-slate-900 transition';
+      render();
+    }
+    function setSummaryMode(m) {
+      state.summaryMode = m;
+      document.getElementById('btn-view-metrics').className = m === 'metrics'
+        ? 'px-2.5 py-1 rounded-md text-xs font-semibold bg-white text-slate-900 shadow-xs transition'
+        : 'px-2.5 py-1 rounded-md text-xs font-semibold text-slate-600 hover:text-slate-900 transition';
+      document.getElementById('btn-view-coverage').className = m === 'coverage'
+        ? 'px-2.5 py-1 rounded-md text-xs font-semibold bg-white text-slate-900 shadow-xs transition'
+        : 'px-2.5 py-1 rounded-md text-xs font-semibold text-slate-600 hover:text-slate-900 transition';
+      render();
+    }
+
+    function cloneAssignments(list) { return list.map(a => ({ ...a })); }
+
+    function pushUndo(label) {
+      state.undoStack.push({ label, snapshot: cloneAssignments(state.assignments) });
+      if (state.undoStack.length > 20) state.undoStack.shift();
+    }
+
+    function showToast(msg) {
+      const el = document.getElementById('undo-toast');
+      document.getElementById('undo-toast-msg').textContent = msg;
+      el.classList.remove('hidden');
+      if (state.toastTimer) clearTimeout(state.toastTimer);
+      state.toastTimer = setTimeout(() => { el.classList.add('hidden'); }, 5000);
+    }
+
+    function dismissToast() {
+      if (state.toastTimer) clearTimeout(state.toastTimer);
+      document.getElementById('undo-toast').classList.add('hidden');
+    }
+
+    function performUndo() {
+      if (state.undoStack.length === 0) return;
+      const entry = state.undoStack.pop();
+      state.assignments = entry.snapshot;
+      state.autoReview = null;
+      if (state.bannerDemo === 'auto_success') state.bannerDemo = 'none';
+      dismissToast();
+      render();
+    }
+
+    function toggleMoreMenu(e) {
+      e.stopPropagation();
+      document.getElementById('schedule-more-menu').classList.toggle('hidden');
+    }
+    function closeMoreMenu() {
+      const m = document.getElementById('schedule-more-menu');
+      if (m) m.classList.add('hidden');
+    }
+
+    function setStaffFilter(f) { state.staffFilter = f; render(); }
+    function setStaffSearch(q) { state.staffSearch = q; render(); }
+    function toggleStaffSort() { state.staffSort = state.staffSort === 'name' ? 'remaining' : 'name'; render(); }
+
+    function jumpToRosterFromSummary(day, hour) {
+      const coveringShiftIds = state.shifts
+        .filter(sh => sh.startHour <= hour && hour < sh.endHour)
+        .map(sh => sh.id);
+      state.jumpFocus = { day, hour, shiftIds: coveringShiftIds };
+      setActiveTab('roster');
+    }
+    function clearJumpFocus() { state.jumpFocus = null; render(); }
+
+    function togglePin(id) {
+      const a = state.assignments.find(x => x.id === id);
+      if (!a) return;
+      pushUndo('pin change');
+      a.isPinned = !a.isPinned;
+      render();
+    }
+
+    function removeAssignment(id) {
+      const target = state.assignments.find(x => x.id === id);
+      if (!target) return;
+      const st = state.staff.find(s => s.id === target.staffId);
+      const sh = getShift(target.shiftId);
+      pushUndo('remove shift');
+      state.assignments = state.assignments.filter(x => x.id !== id);
+      render();
+      showToast(`Removed ${st ? st.name : 'staff'}${target.isPinned ? ' (Pinned)' : ''} from ${DAYS[target.day]} ${sh ? formatHour(sh.startHour) : ''}`);
+    }
+
+    function toggleStaffHighlight(staffId) {
+      state.highlightedStaffId = state.highlightedStaffId === staffId ? null : staffId;
+      if (state.highlightedStaffId && state.activeTab !== 'roster') { setActiveTab('roster'); return; }
+      render();
+    }
+    function highlightFirstOverLimit() {
+      const derived = computeDerived();
+      if (derived.overLimitStaff.length > 0) {
+        state.highlightedStaffId = derived.overLimitStaff[0].id;
+        setActiveTab('roster');
+      }
+    }
+    function clearStaffHighlight() { state.highlightedStaffId = null; render(); }
+    function highlightPinConflicts() { state.conflictAssignmentIds = new Set(['a1', 'a21']); setActiveTab('roster'); render(); }
+
+    function simulateAutoSchedule() {
+      const before = computeDerived();
+      pushUndo('Auto-schedule');
+      // Keep pinned shifts; mark unpinned shifts as freshly generated for Review state
+      const keptPinned = state.assignments.filter(a => a.isPinned);
+      const unpinned = state.assignments.filter(a => !a.isPinned);
+      const newIds = new Set(unpinned.map(a => a.id));
+      const after = computeDerived();
+      state.autoReview = {
+        beforeCoverage: before.demandCoverage === null ? '–' : `${(before.demandCoverage * 100).toFixed(1)}%`,
+        afterCoverage:  after.demandCoverage === null ? '–' : `${(after.demandCoverage * 100).toFixed(1)}%`,
+        beforeGaps: before.staffingGapCount,
+        afterGaps:  after.staffingGapCount,
+        createdCount: unpinned.length,
+        keptPinnedCount: keptPinned.length,
+        totalHours: after.totalAssignedStaffHours,
+        newIds,
+      };
+      setBannerDemo('auto_success');
+    }
+
+    function undoAutoSchedule() { performUndo(); }
+    function dismissAutoReview() {
+      state.autoReview = null;
+      setBannerDemo('none');
+    }
+
+    function openGuidancePopover(evt, mode, day, shiftId, assignmentId = null) {
+      evt.stopPropagation();
+      closeMoreMenu();
+      const rect = evt.currentTarget.getBoundingClientRect();
+      state.popover = { mode, day, shiftId, assignmentId, pendingStaffId: null, query: '', rect };
+      renderPopover();
+    }
+    function closePopover() { state.popover = null; renderPopover(); }
+    function requestSoftOverride(staffId) { if (state.popover) { state.popover.pendingStaffId = staffId; renderPopoverListBody(); } }
+    function cancelSoftOverride() { if (state.popover) { state.popover.pendingStaffId = null; renderPopoverListBody(); } }
+    function commitAssignment(staffId) {
+      if (!state.popover) return;
+      const { mode, day, shiftId, assignmentId } = state.popover;
+      const st = state.staff.find(s => s.id === staffId);
+      pushUndo(mode === 'assign' ? 'assign shift' : 'reassign shift');
+      if (mode === 'assign') {
+        state.assignments.push({ id: `a${++nextId}`, day, shiftId, staffId, isPinned: false });
+      } else {
+        state.assignments = state.assignments.map(a => a.id === assignmentId ? { ...a, staffId, isPinned: false } : a);
+      }
+      state.popover = null;
+      render();
+      showToast(`${mode === 'assign' ? 'Assigned' : 'Reassigned'} ${st ? st.name : 'staff'} on ${DAYS[day]}`);
+    }
+
+    function handleTargetNInput(raw) {
+      const errEl = document.getElementById('target-n-error');
+      const trimmed = raw.trim();
+      if (!/^\d+(?:\.\d+)?$/.test(trimmed)) {
+        errEl.textContent = 'Enter a number between 1 and 500 (e.g. 15 or 12.5).';
+        errEl.classList.remove('hidden');
+        return;
+      }
+      const parsed = Number(trimmed);
+      if (!Number.isFinite(parsed) || parsed < 1 || parsed > 500) {
+        errEl.textContent = 'Target must be between 1 and 500.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+      const canonicalInput = trimmed.replace(/^0+(?=\d)/, '').replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '');
+      if (canonicalInput !== parsed.toString()) {
+        errEl.textContent = 'Too many decimal places — enter a simpler number (e.g. 12.5).';
+        errEl.classList.remove('hidden');
+        return;
+      }
+      errEl.classList.add('hidden');
+      state.targetN = parsed;
+      render();
+    }
+    function stepTargetN(delta) {
+      const next = Math.min(500, Math.max(1, Math.round((state.targetN + delta) * 100) / 100));
+      document.getElementById('target-n-input').value = String(next);
+      handleTargetNInput(String(next));
+    }
+
+    function openModal(type) {
+      const backdrop = document.getElementById('modal-backdrop');
+      const box = document.getElementById('modal-box');
+      backdrop.classList.remove('hidden');
+
+      if (type === 'staff') {
+        box.innerHTML = `
+          <div class="px-5 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+            <h3 class="text-sm font-bold text-slate-900">Add / Edit Staff</h3>
+            <button onclick="closeModal()" class="text-slate-600 hover:text-slate-900 p-0.5 rounded">${ICONS.x}</button>
+          </div>
+          <div class="p-5 space-y-4 text-xs">
+            <div>
+              <label class="block font-semibold text-slate-800 mb-1.5">Staff Name <span class="text-rose-600">*</span></label>
+              <input type="text" value="Alice Nguyen" class="w-full px-3 py-2 rounded-lg border border-slate-300 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500" />
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-800 mb-1.5">Maximum Weekly Hours <span class="text-rose-600">*</span></label>
+              <input type="number" min="0" value="40" class="w-full px-3 py-2 rounded-lg border border-slate-300 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500" />
+              <p class="text-[11px] text-slate-600 mt-1.5 leading-relaxed">Whole number (0 or more). Staff with 0 max hours are excluded from Auto-schedule &amp; Hour Fairness.</p>
+            </div>
+          </div>
+          <div class="px-5 py-3.5 bg-slate-100/80 border-t border-slate-200 flex justify-end gap-2 text-xs">
+            <button onclick="closeModal()" class="px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
+            <button onclick="closeModal()" class="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold">Save</button>
+          </div>`;
+      } else if (type === 'shifts') {
+        box.innerHTML = `
+          <div class="px-5 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+            <h3 class="text-sm font-bold text-slate-900">Manage Shifts (Mon–Sun)</h3>
+            <button onclick="closeModal()" class="text-slate-600 hover:text-slate-900 p-0.5 rounded">${ICONS.x}</button>
+          </div>
+          <div class="p-5 space-y-3 text-xs">
+            <div class="p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-[11px] leading-relaxed">
+              <strong>Impact preview:</strong> Editing <em>07:00–15:00</em> updates <strong>14 assignments</strong> across the week. Pin states are kept; Auto-schedule won't re-run automatically.
+            </div>
+            ${state.shifts.map(sh => `
+              <div class="flex items-center justify-between px-3 py-2.5 rounded-xl border border-slate-300/80 bg-slate-50/70">
+                <div>
+                  <span class="font-bold text-slate-900 tabular-nums">${formatHour(sh.startHour)} – ${formatHour(sh.endHour)}</span>
+                  <span class="text-slate-600 font-medium ml-1.5">${sh.endHour - sh.startHour}h</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <button class="text-indigo-700 hover:text-indigo-900 font-semibold">Edit</button>
+                  <button onclick="openModal('delete')" class="text-rose-700 hover:text-rose-900 font-semibold">Delete</button>
+                </div>
+              </div>
+            `).join('')}
+            <button class="w-full py-2 rounded-xl border border-dashed border-slate-300 hover:border-indigo-500 text-slate-700 hover:text-indigo-800 font-semibold transition">
+              + Add Shift (07:00–23:00)
+            </button>
+          </div>
+          <div class="px-5 py-3.5 bg-slate-100/80 border-t border-slate-200 flex justify-end">
+            <button onclick="closeModal()" class="px-4 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold">Done</button>
+          </div>`;
+      } else if (type === 'csv') {
+        box.innerHTML = `
+          <div class="px-5 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+            <h3 class="text-sm font-bold text-slate-900">Import Transaction CSV</h3>
+            <button onclick="closeModal()" class="text-slate-600 hover:text-slate-900 p-0.5 rounded">${ICONS.x}</button>
+          </div>
+          <div class="p-5 space-y-3 text-xs">
+            <div class="p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-[11px]">
+              A valid new file replaces the existing weekly transaction dataset.
+            </div>
+            <div class="border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center bg-slate-50 hover:border-indigo-500 hover:bg-indigo-50/30 cursor-pointer transition">
+              ${ICONS.fileUp}
+              <div class="font-semibold text-slate-900 mt-2.5">Drop a .csv file here, or click to browse</div>
+              <div class="text-[11px] font-medium text-slate-600 mt-1">8 columns (Hour + 7 days) × 16 rows (07:00–22:00)</div>
+            </div>
+          </div>
+          <div class="px-5 py-3.5 bg-slate-100/80 border-t border-slate-200 flex justify-end gap-2 text-xs">
+            <button onclick="closeModal()" class="px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold text-slate-700">Cancel</button>
+            <button onclick="closeModal()" class="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold">Import</button>
+          </div>`;
+      } else if (type === 'delete') {
+        box.innerHTML = `
+          <div class="px-5 py-4 border-b border-slate-200 bg-rose-50/70 flex items-center justify-between">
+            <h3 class="text-sm font-bold text-rose-800">Confirm Deletion</h3>
+            <button onclick="closeModal()" class="text-rose-700 hover:text-rose-950 p-0.5 rounded">${ICONS.x}</button>
+          </div>
+          <div class="p-5 text-xs text-slate-700 space-y-2 leading-relaxed">
+            <p>Deleting <strong class="text-slate-900">Alice Nguyen</strong> will remove <strong class="text-slate-900">5 active assignments</strong> from this week's roster.</p>
+            <p class="text-slate-600">Weekly Roster, Team Panel, Hourly Summary, and Schedule Health will update immediately. Auto-schedule will not re-run automatically.</p>
+          </div>
+          <div class="px-5 py-3.5 bg-slate-100/80 border-t border-slate-200 flex justify-end gap-2 text-xs">
+            <button onclick="closeModal()" class="px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold text-slate-700">Cancel</button>
+            <button onclick="closeModal()" class="px-4 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-semibold">Delete &amp; Remove Shifts</button>
+          </div>`;
+      }
+    }
+
+    function closeModal() { document.getElementById('modal-backdrop').classList.add('hidden'); }
+
+    document.addEventListener('click', (e) => {
+      const pop = document.getElementById('guidance-popover');
+      if (state.popover && !pop.contains(e.target)) closePopover();
+      const moreWrap = document.getElementById('schedule-more-wrap');
+      if (moreWrap && !moreWrap.contains(e.target)) closeMoreMenu();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { closePopover(); closeModal(); closeMoreMenu(); }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        const tag = (document.activeElement?.tagName || '').toLowerCase();
+        if (tag !== 'input' && tag !== 'textarea') {
+          e.preventDefault();
+          performUndo();
+        }
+      }
+    });
+
+    hydrateStaticIcons();
+    render();
+  </script>
+</body>
+</html>
