@@ -6,7 +6,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { BarChart3, CalendarDays, RotateCcw, X } from 'lucide-react';
+import { BarChart3, CalendarDays, PanelRightClose, PanelRightOpen, RotateCcw, X } from 'lucide-react';
 import type {
   Assignment,
   AutoScheduleResult,
@@ -52,6 +52,7 @@ interface UndoEntry {
  */
 export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceScreenProps) {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('roster');
+  const [teamPanelOpen, setTeamPanelOpen] = useState(true);
   const [highlightedStaffId, setHighlightedStaffId] = useState<string | null>(null);
   const [highlightedOverLimitOnly, setHighlightedOverLimitOnly] = useState(false);
   const [focusedSlot, setFocusedSlot] = useState<FocusedRosterSlot | null>(null);
@@ -332,6 +333,24 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
                       </button>
                     </span>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => setTeamPanelOpen((prev) => !prev)}
+                    title={teamPanelOpen ? 'Hide Team panel to expand roster' : 'Show Team panel'}
+                    className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                  >
+                    {teamPanelOpen ? (
+                      <>
+                        <PanelRightClose className="h-3.5 w-3.5" aria-hidden="true" />
+                        Hide Team
+                      </>
+                    ) : (
+                      <>
+                        <PanelRightOpen className="h-3.5 w-3.5" aria-hidden="true" />
+                        Team ({schedule.staff.length})
+                      </>
+                    )}
+                  </button>
                 </div>
               ) : (
                 <div className="text-xs text-slate-600">
@@ -403,19 +422,21 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
             )}
           </section>
 
-          <StaffPanel
-            staff={schedule.staff}
-            staffMetrics={viewModel?.staffMetrics ?? {}}
-            highlightedStaffId={highlightedStaffId}
-            onSelectStaff={(staffId) => {
-              setHighlightedOverLimitOnly(false);
-              setHighlightedStaffId(staffId);
-              if (staffId) setActiveTab('roster');
-            }}
-            onAddStaff={() => setStaffModalState({ open: true, editing: null })}
-            onEditStaff={(member) => setStaffModalState({ open: true, editing: member })}
-            onRequestDeleteStaff={handleRequestDeleteStaff}
-          />
+          {teamPanelOpen && (
+            <StaffPanel
+              staff={schedule.staff}
+              staffMetrics={viewModel?.staffMetrics ?? {}}
+              highlightedStaffId={highlightedStaffId}
+              onSelectStaff={(staffId) => {
+                setHighlightedOverLimitOnly(false);
+                setHighlightedStaffId(staffId);
+                if (staffId) setActiveTab('roster');
+              }}
+              onAddStaff={() => setStaffModalState({ open: true, editing: null })}
+              onEditStaff={(member) => setStaffModalState({ open: true, editing: member })}
+              onRequestDeleteStaff={handleRequestDeleteStaff}
+            />
+          )}
         </div>
       </main>
 

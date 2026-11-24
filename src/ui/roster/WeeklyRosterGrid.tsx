@@ -305,12 +305,18 @@ export function WeeklyRosterGrid({
       )}
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[920px] border-collapse text-left">
+        <table className="w-full min-w-[740px] table-fixed border-collapse text-left">
+          <colgroup>
+            <col className="w-[108px] xl:w-[118px]" />
+            {DAYS_OF_WEEK.map((day) => (
+              <col key={day} />
+            ))}
+          </colgroup>
           <thead>
             <tr className="border-b border-slate-200 bg-slate-100">
               <th
                 scope="col"
-                className="sticky left-0 z-20 w-36 border-r border-slate-200 bg-slate-100 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-700"
+                className="sticky left-0 z-20 border-r border-slate-200 bg-slate-100 px-2.5 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-700"
               >
                 Shift
               </th>
@@ -323,7 +329,7 @@ export function WeeklyRosterGrid({
                   <th
                     key={day}
                     scope="col"
-                    className={`min-w-[118px] border-r border-slate-200 px-2.5 py-2 align-top last:border-r-0 ${
+                    className={`border-r border-slate-200 px-2 py-2 align-top last:border-r-0 ${
                       isFocusedDay
                         ? 'bg-indigo-100/80'
                         : isWeekend
@@ -350,7 +356,7 @@ export function WeeklyRosterGrid({
                       ) : status.hasDemand ? (
                         <span className="inline-flex items-center gap-0.5 whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.2 text-[10px] font-medium text-emerald-800">
                           <CheckCircle2 className="h-2.5 w-2.5" aria-hidden="true" />
-                          Covered
+                          OK
                         </span>
                       ) : null}
                     </div>
@@ -368,34 +374,34 @@ export function WeeklyRosterGrid({
                   {/* Sticky Shift Row Header */}
                   <th
                     scope="row"
-                    className="group sticky left-0 z-10 w-36 border-r border-slate-200 bg-white px-3 py-3 text-left font-normal"
+                    className="group sticky left-0 z-10 border-r border-slate-200 bg-white px-2.5 py-2.5 text-left font-normal"
                   >
-                    <div className="flex items-start justify-between gap-1">
-                      <div>
-                        <p className="whitespace-nowrap text-xs font-semibold text-slate-900">
-                          {formatShiftRange(shift.startHour, shift.endHour)}
-                        </p>
-                        <p className="mt-0.5 text-[11px] text-slate-600">{duration}h shift</p>
-                      </div>
-                      <div className="flex items-center gap-0.5 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
-                        <button
-                          type="button"
-                          onClick={onOpenManageShifts}
-                          aria-label={`Manage shift ${formatShiftRange(shift.startHour, shift.endHour)}`}
-                          title="Edit or delete shift template"
-                          className="rounded p-1 text-slate-600 hover:bg-slate-100 hover:text-slate-900 focus:opacity-100"
-                        >
-                          <Pencil className="h-3 w-3" aria-hidden="true" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={onOpenManageShifts}
-                          aria-label={`Delete shift ${formatShiftRange(shift.startHour, shift.endHour)}`}
-                          title="Manage shifts"
-                          className="rounded p-1 text-slate-600 hover:bg-rose-50 hover:text-rose-700 focus:opacity-100"
-                        >
-                          <Trash2 className="h-3 w-3" aria-hidden="true" />
-                        </button>
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold leading-tight text-slate-900 tabular-nums">
+                        {formatHour24(shift.startHour)}–{formatHour24(shift.endHour)}
+                      </p>
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-[11px] text-slate-600">{duration}h</span>
+                        <div className="flex items-center gap-0.5 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
+                          <button
+                            type="button"
+                            onClick={onOpenManageShifts}
+                            aria-label={`Manage shift ${formatShiftRange(shift.startHour, shift.endHour)}`}
+                            title="Edit or delete shift template"
+                            className="rounded p-0.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900 focus:opacity-100"
+                          >
+                            <Pencil className="h-3 w-3" aria-hidden="true" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={onOpenManageShifts}
+                            aria-label={`Delete shift ${formatShiftRange(shift.startHour, shift.endHour)}`}
+                            title="Manage shifts"
+                            className="rounded p-0.5 text-slate-600 hover:bg-rose-50 hover:text-rose-700 focus:opacity-100"
+                          >
+                            <Trash2 className="h-3 w-3" aria-hidden="true" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </th>
@@ -419,21 +425,21 @@ export function WeeklyRosterGrid({
                     if (need.hasGap) {
                       addButtonClasses =
                         'border-rose-300 bg-rose-50 text-rose-800 font-semibold hover:bg-rose-100';
-                      addButtonLabel = 'Gap · Add';
+                      addButtonLabel = 'Gap';
                     } else if (need.maxNeed >= 2) {
                       addButtonClasses =
                         'border-amber-300 bg-amber-50 text-amber-900 font-semibold hover:bg-amber-100';
-                      addButtonLabel = 'Add (need 2+)';
+                      addButtonLabel = 'Need 2+';
                     } else if (need.maxNeed === 1) {
                       addButtonClasses =
                         'border-slate-300 bg-white text-slate-700 font-medium hover:border-indigo-400 hover:text-indigo-700';
-                      addButtonLabel = 'Add (need 1)';
+                      addButtonLabel = 'Need 1';
                     }
 
                     return (
                       <td
                         key={day}
-                        className={`border-r border-slate-200 p-2 last:border-r-0 ${
+                        className={`border-r border-slate-200 p-1.5 last:border-r-0 ${
                           isFocusedCell
                             ? 'bg-indigo-50/70 ring-2 ring-inset ring-indigo-400'
                             : isWeekend

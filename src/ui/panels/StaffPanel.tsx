@@ -114,7 +114,7 @@ export function StaffPanel({
   return (
     <aside
       aria-label="Team panel"
-      className="w-full shrink-0 overflow-hidden rounded-xl border border-slate-300/80 bg-white shadow-xs lg:sticky lg:top-16 lg:w-[300px] xl:w-[324px]"
+      className="w-full shrink-0 overflow-hidden rounded-xl border border-slate-300/80 bg-white shadow-xs lg:sticky lg:top-16 lg:w-[268px] xl:w-[292px]"
     >
       {/* Header + Totals + Search/Filter/Sort */}
       <div className="space-y-2.5 border-b border-slate-200 bg-slate-50/80 px-4 py-3">
