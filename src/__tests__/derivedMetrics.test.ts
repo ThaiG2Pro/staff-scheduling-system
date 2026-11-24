@@ -9,7 +9,9 @@ import {
 import {
   classifyDemandCoverageStatus,
   classifyFairnessStatus,
+  deriveScheduleListSummaries,
   deriveScheduleViewModel,
+  getMissingAutoScheduleInputs,
 } from '../domain/derivedMetrics';
 import type { OperatingHour, Schedule, TransactionGrid } from '../domain/types';
 
@@ -334,5 +336,88 @@ describe('derivedMetrics & constraints (T-06, T-07, T-08, AC-01, AC-03)', () => 
     expect(res.viewModel.assignmentWarnings['a1']?.isOverlapping).toBe(false);
     expect(res.viewModel.assignmentWarnings['a1']?.isMultiShiftDay).toBe(true);
     expect(res.viewModel.assignmentWarnings['a1']?.isOverMaxHours).toBe(true);
+  });
+
+  it('derives UI-friendly DTOs: totalTeamCapacityHours, autoScheduleMissingInputs, and ScheduleListItemSummary (AC-01, AC-04)', () => {
+    const incompleteSchedule: Schedule = {
+      id: 'sched-empty',
+      name: 'Empty Draft',
+      createdAt: '2026-08-07T00:00:00.000Z',
+      updatedAt: '2026-08-08T00:00:00.000Z',
+      targetTxnsPerStaffHour: 0,
+      staff: [{ id: 'zero', name: 'Zero', maxWeeklyHours: 0 }],
+      shifts: [],
+      demand: null,
+      assignments: [],
+    };
+
+    expect(getMissingAutoScheduleInputs(incompleteSchedule)).toEqual([
+      'DEMAND',
+      'SHIFTS',
+      'ELIGIBLE_STAFF',
+      'INVALID_N',
+    ]);
+
+    const readySchedule: Schedule = {
+      id: 'sched-ready',
+      name: 'Ready Week',
+      createdAt: '2026-08-07T00:00:00.000Z',
+      updatedAt: '2026-08-09T00:00:00.000Z',
+      targetTxnsPerStaffHour: 15,
+      staff: [
+        { id: 's1', name: 'Alice', maxWeeklyHours: 40 },
+        { id: 's2', name: 'Bob', maxWeeklyHours: 24 },
+      ],
+      shifts: [
+        { id: 'sh1', startHour: 7, endHour: 15 },
+        { id: 'sh2', startHour: 14, endHour: 22 },
+      ],
+      demand: { importedAt: '2026-08-07T00:00:00.000Z', transactions: createZeroGrid() },
+      assignments: [
+        { id: 'a1', day: 0, shiftId: 'sh1', staffId: 's1', isPinned: false },
+        { id: 'a2', day: 0, shiftId: 'sh2', staffId: 's1', isPinned: false },
+      ],
+    };
+
+    const vmRes = deriveScheduleViewModel(readySchedule);
+    expect(vmRes.ok).toBe(true);
+    if (!vmRes.ok) return;
+    expect(vmRes.viewModel.health.totalTeamCapacityHours).toBe(64);
+    expect(vmRes.viewModel.autoScheduleMissingInputs).toEqual([]);
+
+    // ScheduleListItemSummary uses union-of-hours (15h, not 16h)
+    const listSummaries = deriveScheduleListSummaries([incompleteSchedule, readySchedule]);
+    expect(listSummaries).toEqual([
+      {
+        id: 'sched-empty',
+        name: 'Empty Draft',
+        staffCount: 1,
+        totalStaffHours: 0,
+        hasDemand: false,
+        updatedAt: '2026-08-08T00:00:00.000Z',
+      },
+      {
+        id: 'sched-ready',
+        name: 'Ready Week',
+        staffCount: 2,
+        totalStaffHours: 15,
+        hasDemand: true,
+        updatedAt: '2026-08-09T00:00:00.000Z',
+      },
+    ]);
+
+    // BigInt overflow guard on totalTeamCapacityHours
+    const overflowSchedule: Schedule = {
+      ...readySchedule,
+      staff: [
+        { id: 's1', name: 'A', maxWeeklyHours: Number.MAX_SAFE_INTEGER },
+        { id: 's2', name: 'B', maxWeeklyHours: 1 },
+      ],
+    };
+    const overflowRes = deriveScheduleViewModel(overflowSchedule);
+    expect(overflowRes.ok).toBe(false);
+    if (!overflowRes.ok) {
+      expect(overflowRes.error).toBe('SAFE_INTEGER_OVERFLOW');
+    }
   });
 });

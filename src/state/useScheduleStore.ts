@@ -5,12 +5,16 @@
  */
 
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { deriveScheduleViewModel } from '../domain/derivedMetrics';
+import {
+  deriveScheduleListSummaries,
+  deriveScheduleViewModel,
+} from '../domain/derivedMetrics';
 import type {
   DayOfWeek,
   DeletePreview,
   Schedule,
   ScheduleDerivationResult,
+  ScheduleListItemSummary,
 } from '../domain/types';
 import { loadState, resetStorageAtomic, saveState } from '../persistence/localStorageAdapter';
 import type {
@@ -68,6 +72,7 @@ export interface ScheduleStore {
   storageErrorMessage: string | null;
   hydrationWarnings: string[];
   scheduleRevision: Record<string, number>;
+  scheduleListSummaries: ScheduleListItemSummary[];
   activeSchedule: Schedule | null;
   activeViewModelResult: ScheduleDerivationResult | null;
   resetStorage: () => { ok: boolean; error?: string };
@@ -194,6 +199,11 @@ export function useScheduleStore(
     return loaded;
   }, [getStorage]);
 
+  const scheduleListSummaries = useMemo(
+    () => deriveScheduleListSummaries(persisted.schedules),
+    [persisted.schedules],
+  );
+
   const activeSchedule = useMemo(
     () => persisted.schedules.find((s) => s.id === persisted.activeScheduleId) ?? null,
     [persisted.schedules, persisted.activeScheduleId],
@@ -212,6 +222,7 @@ export function useScheduleStore(
     storageErrorMessage,
     hydrationWarnings,
     scheduleRevision,
+    scheduleListSummaries,
     activeSchedule,
     activeViewModelResult,
     resetStorage,

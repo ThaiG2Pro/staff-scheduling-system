@@ -10,7 +10,7 @@ import {
   MAX_SAFE_BIGINT,
   OPERATING_HOURS,
 } from './constants';
-import { computeRequiredStaff, safeBigIntToNumber } from './decimalMath';
+import { computeRequiredStaff, isValidTargetN, safeBigIntToNumber } from './decimalMath';
 import { computeStaffHoursGrid } from './hardRules';
 import { computeAllStaffMetrics, computeFairnessJainIndex } from './staffMetrics';
 import type {
@@ -18,10 +18,12 @@ import type {
   DayOfWeek,
   DemandCoverageMetric,
   HealthStatus,
+  MissingInputCode,
   OperatingHour,
   Schedule,
   ScheduleDerivationResult,
   ScheduleHealth,
+  ScheduleListItemSummary,
   ShiftTemplate,
   SummaryCell,
 } from './types';
@@ -206,8 +208,48 @@ export function computeWeeklySummary(
 }
 
 /**
+ * Returns the list of missing or invalid prerequisites blocking Auto-schedule (E-02).
+ * Enables TopActionBar to render disabled state and contextual helper text before click.
+ */
+export function getMissingAutoScheduleInputs(schedule: Readonly<Schedule>): MissingInputCode[] {
+  const missing: MissingInputCode[] = [];
+  if (schedule.demand === null) missing.push('DEMAND');
+  if (schedule.shifts.length === 0) missing.push('SHIFTS');
+  if (!schedule.staff.some((s) => s.maxWeeklyHours > 0)) missing.push('ELIGIBLE_STAFF');
+  if (!isValidTargetN(schedule.targetTxnsPerStaffHour)) missing.push('INVALID_N');
+  return missing;
+}
+
+/**
+ * Derives lightweight card metadata for `ScheduleListScreen` using union-of-hours `totalStaffHours`.
+ *
+ * @param schedules - List of persisted schedules.
+ * @returns UI-ready summary cards with `staffCount`, `totalStaffHours`, and `hasDemand`.
+ */
+export function deriveScheduleListSummaries(
+  schedules: readonly Readonly<Schedule>[],
+): ScheduleListItemSummary[] {
+  return schedules.map((schedule) => {
+    const shiftMap = new Map(schedule.shifts.map((sh) => [sh.id, sh]));
+    const grid = computeStaffHoursGrid(schedule.assignments, shiftMap);
+    let totalStaffHours = 0;
+    for (let i = 0; i < grid.length; i++) {
+      totalStaffHours += grid[i] ?? 0;
+    }
+    return {
+      id: schedule.id,
+      name: schedule.name,
+      staffCount: schedule.staff.length,
+      totalStaffHours,
+      hasDemand: schedule.demand !== null,
+      updatedAt: schedule.updatedAt,
+    };
+  });
+}
+
+/**
  * Pure derived-state selector for a Schedule (`Domain Model §6`, `Optimization Spec §5`).
- * Computes `staffMetrics`, `assignmentWarnings`, `summary`, and 4 independent `health` signals.
+ * Computes `staffMetrics`, `assignmentWarnings`, `summary`, `health`, and `autoScheduleMissingInputs`.
  *
  * @param schedule - Readonly schedule snapshot.
  * @returns Complete `ScheduleViewModel` or a controlled overflow/validation error.
@@ -221,8 +263,13 @@ export function deriveScheduleViewModel(schedule: Readonly<Schedule>): ScheduleD
   const summaryRes = computeWeeklySummary(schedule, shiftMap);
   if (!summaryRes.ok) return summaryRes;
 
-  const { staffMetrics, assignmentWarnings, hourLimitWarningCount, unusedCapacityHours } =
-    staffRes.data;
+  const {
+    staffMetrics,
+    assignmentWarnings,
+    hourLimitWarningCount,
+    totalTeamCapacityHours,
+    unusedCapacityHours,
+  } = staffRes.data;
   const { summary, staffingGapCount, demandCoverage } = summaryRes;
   const fairness = computeFairnessJainIndex(schedule.staff, staffMetrics);
 
@@ -237,11 +284,18 @@ export function deriveScheduleViewModel(schedule: Readonly<Schedule>): ScheduleD
     fairnessStatus: classifyFairnessStatus(fairness.jainIndex),
     eligibleStaffCount: fairness.eligibleStaffCount,
     isSingleEligibleStaff: fairness.isSingleEligibleStaff,
+    totalTeamCapacityHours,
     unusedCapacityHours,
   };
 
   return {
     ok: true,
-    viewModel: { staffMetrics, assignmentWarnings, summary, health },
+    viewModel: {
+      staffMetrics,
+      assignmentWarnings,
+      summary,
+      health,
+      autoScheduleMissingInputs: getMissingAutoScheduleInputs(schedule),
+    },
   };
 }

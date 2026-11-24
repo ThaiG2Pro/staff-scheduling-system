@@ -249,6 +249,7 @@ export interface ScheduleHealth {
   fairnessStatus: HealthStatus;
   eligibleStaffCount: number;
   isSingleEligibleStaff: boolean;
+  totalTeamCapacityHours: number;
   unusedCapacityHours: number;
 }
 
@@ -257,6 +258,16 @@ export interface ScheduleViewModel {
   assignmentWarnings: Record<string, AssignmentWarningFlags>;
   summary: AggregatedSummary;
   health: ScheduleHealth;
+  autoScheduleMissingInputs: MissingInputCode[];
+}
+
+export interface ScheduleListItemSummary {
+  id: string;
+  name: string;
+  staffCount: number;
+  totalStaffHours: number;
+  hasDemand: boolean;
+  updatedAt: string;
 }
 
 export type ScheduleDerivationResult =

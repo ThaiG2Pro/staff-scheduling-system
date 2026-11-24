@@ -20,6 +20,7 @@ export interface StaffMetricsBundle {
   staffMetrics: Record<string, StaffMetrics>;
   assignmentWarnings: Record<string, AssignmentWarningFlags>;
   hourLimitWarningCount: number;
+  totalTeamCapacityHours: number;
   unusedCapacityHours: number;
 }
 
@@ -48,6 +49,7 @@ export function computeAllStaffMetrics(
   }
 
   let hourLimitWarningCount = 0;
+  let totalTeamCapacityBigInt = 0n;
   let unusedCapacityBigInt = 0n;
 
   for (const s of staff) {
@@ -56,6 +58,15 @@ export function computeAllStaffMetrics(
         ok: false,
         error: 'INVALID_INPUT',
         message: `Invalid maxWeeklyHours for staff "${s.id}".`,
+      };
+    }
+
+    totalTeamCapacityBigInt += BigInt(s.maxWeeklyHours);
+    if (totalTeamCapacityBigInt > MAX_SAFE_BIGINT) {
+      return {
+        ok: false,
+        error: 'SAFE_INTEGER_OVERFLOW',
+        message: 'SAFE_INTEGER_OVERFLOW: totalTeamCapacityHours exceeded Number.MAX_SAFE_INTEGER.',
       };
     }
 
@@ -132,6 +143,15 @@ export function computeAllStaffMetrics(
     }
   }
 
+  const totalTeamCapacitySafe = safeBigIntToNumber(totalTeamCapacityBigInt);
+  if (!totalTeamCapacitySafe.ok) {
+    return {
+      ok: false,
+      error: 'SAFE_INTEGER_OVERFLOW',
+      message: 'SAFE_INTEGER_OVERFLOW: totalTeamCapacityHours exceeded Number.MAX_SAFE_INTEGER.',
+    };
+  }
+
   const unusedCapacitySafe = safeBigIntToNumber(unusedCapacityBigInt);
   if (!unusedCapacitySafe.ok) {
     return {
@@ -147,6 +167,7 @@ export function computeAllStaffMetrics(
       staffMetrics,
       assignmentWarnings,
       hourLimitWarningCount,
+      totalTeamCapacityHours: totalTeamCapacitySafe.value,
       unusedCapacityHours: unusedCapacitySafe.value,
     },
   };
