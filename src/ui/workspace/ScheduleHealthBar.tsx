@@ -1,7 +1,7 @@
 /**
  * @file Unified 4-signal Schedule Health Bar (`AC-05`) evaluating Staffing Gaps,
  * Hour Limit Warnings, Demand Coverage, and Hour Fairness (Jain Index) independently
- * on unrounded floats with WCAG-accessible icon + text labels.
+ * on unrounded floats with user-friendly Store Manager copy and WCAG icon + text badges.
  */
 
 import { AlertTriangle, CheckCircle2, CircleDot, Minus } from 'lucide-react';
@@ -13,42 +13,58 @@ export interface ScheduleHealthBarProps {
   onInspectHourLimitWarnings: () => void;
 }
 
-function StatusBadge({ status }: { status: HealthStatus }) {
+function getTone(status: HealthStatus): {
+  pill: string;
+  bar: string;
+  label: string;
+} {
   if (status === 'good') {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
-        <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
-        Good
-      </span>
-    );
+    return {
+      pill: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+      bar: 'bg-emerald-600',
+      label: 'Good',
+    };
   }
   if (status === 'attention') {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-900">
-        <CircleDot className="h-3 w-3" aria-hidden="true" />
-        Attention
-      </span>
-    );
+    return {
+      pill: 'border-amber-300 bg-amber-50 text-amber-900',
+      bar: 'bg-amber-500',
+      label: 'Attention',
+    };
   }
   if (status === 'warning') {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-800">
-        <AlertTriangle className="h-3 w-3" aria-hidden="true" />
-        Warning
-      </span>
-    );
+    return {
+      pill: 'border-rose-300 bg-rose-50 text-rose-800',
+      bar: 'bg-rose-600',
+      label: 'Warning',
+    };
   }
+  return {
+    pill: 'border-slate-300 bg-slate-100 text-slate-700',
+    bar: 'bg-slate-400',
+    label: 'Neutral',
+  };
+}
+
+function StatusPill({ status }: { status: HealthStatus }) {
+  const tone = getTone(status);
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
-      <Minus className="h-3 w-3" aria-hidden="true" />
-      Neutral
+    <span
+      className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold ${tone.pill}`}
+    >
+      {status === 'good' && <CheckCircle2 className="h-3 w-3" aria-hidden="true" />}
+      {status === 'attention' && <CircleDot className="h-3 w-3" aria-hidden="true" />}
+      {status === 'warning' && <AlertTriangle className="h-3 w-3" aria-hidden="true" />}
+      {status === 'neutral' && <Minus className="h-3 w-3" aria-hidden="true" />}
+      {tone.label}
     </span>
   );
 }
 
 /**
- * Displays the 4 independent Schedule Health signals in a single compact strip.
- * Never merges signals into a single composite score.
+ * Displays the 4 independent Schedule Health signals in a responsive 4-column strip.
+ * Uses plain Store Manager language, large tabular metrics, progress bars, and full text wrap
+ * so no card content is ever clipped.
  *
  * @param props - Derived `ScheduleHealth` metrics and click-to-inspect callbacks.
  * @returns 4-column Health Strip.
@@ -58,57 +74,60 @@ export function ScheduleHealthBar({
   onInspectGapsOrCoverage,
   onInspectHourLimitWarnings,
 }: ScheduleHealthBarProps) {
-  const coveragePct =
-    health.demandCoverage && health.demandCoverage.ratio !== null
-      ? `${Math.round(health.demandCoverage.ratio * 100)}%`
-      : '–';
+  const hasDemand = health.staffingGapCount !== null;
 
-  const coverageSubtext = health.demandCoverage
-    ? health.demandCoverage.totalRequiredStaffHours === 0
-      ? 'No demand hours'
-      : `${health.demandCoverage.coveredRequiredStaffHours}/${health.demandCoverage.totalRequiredStaffHours} req hrs`
-    : 'Import CSV to evaluate';
+  const gapVal = !hasDemand
+    ? '–'
+    : `${health.staffingGapCount} ${health.staffingGapCount === 1 ? 'gap' : 'gaps'}`;
+  const gapSub = !hasDemand ? 'Import CSV to evaluate' : 'Busy hours with 0 staff';
 
-  const fairnessPct =
-    health.fairnessJainIndex !== null ? `${Math.round(health.fairnessJainIndex * 100)}%` : '–';
+  const hlVal = `${health.hourLimitWarningCount} staff`;
+  const hlSub =
+    health.hourLimitWarningCount === 0
+      ? 'All within weekly limits'
+      : 'Click to highlight over-limit staff';
 
-  const fairnessSubtext =
+  const covRatio = health.demandCoverage?.ratio ?? null;
+  const covPctNum = covRatio !== null ? Math.min(100, Math.round(covRatio * 100)) : null;
+  const covVal = covRatio === null ? '–' : `${(covRatio * 100).toFixed(1)}%`;
+  const covSub =
+    covRatio === null ? 'No demand loaded' : 'Hourly demand met · ≥90% Good';
+
+  const jainPctNum =
     health.fairnessJainIndex !== null
-      ? health.isSingleEligibleStaff
-        ? `Jain ${health.fairnessJainIndex.toFixed(2)} (1 eligible staff)`
-        : `Jain ${health.fairnessJainIndex.toFixed(2)} (${health.eligibleStaffCount} eligible)`
-      : 'No eligible staff with hours';
+      ? Math.min(100, Math.round(health.fairnessJainIndex * 100))
+      : null;
+  const jainVal = jainPctNum === null ? '–' : `${jainPctNum}%`;
+  const jainSub =
+    health.fairnessJainIndex === null
+      ? 'No hours assigned yet'
+      : health.isSingleEligibleStaff
+        ? '1 active staff — no comparison'
+        : `Team balance · Jain ${health.fairnessJainIndex.toFixed(2)}`;
 
   return (
     <section
       aria-label="Schedule health"
-      className="rounded-xl border border-slate-300/80 bg-white shadow-xs"
+      className="overflow-hidden rounded-xl border border-slate-300/80 bg-white shadow-xs"
     >
-      <div className="grid grid-cols-1 divide-y divide-slate-200 sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-4 lg:divide-x">
+      <div className="grid grid-cols-1 divide-y divide-slate-200 sm:grid-cols-2 sm:divide-y-0 sm:gap-px sm:bg-slate-200 xl:grid-cols-4">
         {/* 1. Staffing Gaps */}
         <button
           type="button"
           onClick={onInspectGapsOrCoverage}
-          title="Hours with customer transactions > 0 and 0 staff scheduled. Click to inspect Hourly Summary."
-          className="flex items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-600 rounded-tl-xl lg:rounded-l-xl"
+          title="Operating hours with transactions > 0 and 0 staff. Click to inspect Hourly Summary."
+          className="flex min-w-0 flex-col justify-between bg-white px-4 py-3.5 text-left transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-600"
         >
-          <div>
-            <p className="text-xs font-medium text-slate-600">Staffing Gaps</p>
-            <p className="mt-0.5 text-lg font-bold text-slate-900">
-              {health.staffingGapCount === null ? '–' : health.staffingGapCount}
-              <span className="ml-1 text-xs font-normal text-slate-600">
-                {health.staffingGapCount === null ? '' : health.staffingGapCount === 1 ? 'hr' : 'hrs'}
-              </span>
-            </p>
-            <p className="text-[11px] text-slate-600">
-              {health.staffingGapCount === null
-                ? 'Import CSV to evaluate'
-                : health.staffingGapCount === 0
-                  ? 'All active hours covered'
-                  : 'Click to inspect gaps'}
-            </p>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-slate-700">Staffing Gaps</span>
+            <StatusPill status={health.staffingGapStatus} />
           </div>
-          <StatusBadge status={health.staffingGapStatus} />
+          <div className="mt-2 flex items-baseline gap-2.5">
+            <span className="text-2xl font-bold tracking-tight text-slate-900 tabular-nums">
+              {gapVal}
+            </span>
+          </div>
+          <p className="mt-1 text-xs font-medium leading-snug text-slate-600">{gapSub}</p>
         </button>
 
         {/* 2. Hour Limit Warnings */}
@@ -116,50 +135,71 @@ export function ScheduleHealthBar({
           type="button"
           onClick={onInspectHourLimitWarnings}
           disabled={health.hourLimitWarningCount === 0}
-          title="Staff whose union-of-hours assigned exceeds maxWeeklyHours."
-          className="flex items-center justify-between gap-3 px-4 py-3 text-left transition enabled:hover:bg-slate-50 disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-600"
+          title="Staff exceeding their weekly hour limit. Click to highlight on roster."
+          className="flex min-w-0 flex-col justify-between bg-white px-4 py-3.5 text-left transition enabled:hover:bg-slate-50 disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-600"
         >
-          <div>
-            <p className="text-xs font-medium text-slate-600">Hour Limit Warnings</p>
-            <p className="mt-0.5 text-lg font-bold text-slate-900">
-              {health.hourLimitWarningCount}
-              <span className="ml-1 text-xs font-normal text-slate-600">staff</span>
-            </p>
-            <p className="text-[11px] text-slate-600">
-              {health.hourLimitWarningCount === 0
-                ? 'Everyone within cap'
-                : 'Click to highlight on roster'}
-            </p>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-slate-700">Hour Limit Warnings</span>
+            <StatusPill status={health.hourLimitWarningStatus} />
           </div>
-          <StatusBadge status={health.hourLimitWarningStatus} />
+          <div className="mt-2 flex items-baseline gap-2.5">
+            <span className="text-2xl font-bold tracking-tight text-slate-900 tabular-nums">
+              {hlVal}
+            </span>
+          </div>
+          <p className="mt-1 text-xs font-medium leading-snug text-slate-600">{hlSub}</p>
         </button>
 
         {/* 3. Demand Coverage */}
         <button
           type="button"
           onClick={onInspectGapsOrCoverage}
-          title="Percentage of required staff-hours covered across 7×16 operating hours. Good ≥90%, Attention 75–89%, Warning <75%."
-          className="flex items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-600"
+          title="Share of hourly staffing demand covered (≥90% Good, 75–<90% Attention, <75% Warning). Click to view Hourly Summary."
+          className="flex min-w-0 flex-col justify-between bg-white px-4 py-3.5 text-left transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-600"
         >
-          <div>
-            <p className="text-xs font-medium text-slate-600">Demand Coverage</p>
-            <p className="mt-0.5 text-lg font-bold text-slate-900">{coveragePct}</p>
-            <p className="text-[11px] text-slate-600">{coverageSubtext}</p>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-slate-700">Demand Coverage</span>
+            <StatusPill status={health.demandCoverageStatus} />
           </div>
-          <StatusBadge status={health.demandCoverageStatus} />
+          <div className="mt-2 flex items-center gap-3">
+            <span className="text-2xl font-bold tracking-tight text-slate-900 tabular-nums">
+              {covVal}
+            </span>
+            {covPctNum !== null && (
+              <div className="h-2 flex-1 max-w-[100px] overflow-hidden rounded-full bg-slate-200">
+                <div
+                  className={`h-full rounded-full transition-all ${getTone(health.demandCoverageStatus).bar}`}
+                  style={{ width: `${covPctNum}%` }}
+                />
+              </div>
+            )}
+          </div>
+          <p className="mt-1 text-xs font-medium leading-snug text-slate-600">{covSub}</p>
         </button>
 
         {/* 4. Hour Fairness */}
         <div
-          title="Jain Fairness Index across eligible staff (maxWeeklyHours > 0) based on utilization ratio. Good ≥90%, Attention 80–89%, Warning <80%."
-          className="flex items-center justify-between gap-3 px-4 py-3 text-left"
+          title="Jain Fairness Index (0.00–1.00) measuring how evenly weekly hour caps are utilized across active team members."
+          className="flex min-w-0 flex-col justify-between bg-white px-4 py-3.5 text-left"
         >
-          <div>
-            <p className="text-xs font-medium text-slate-600">Hour Fairness</p>
-            <p className="mt-0.5 text-lg font-bold text-slate-900">{fairnessPct}</p>
-            <p className="text-[11px] text-slate-600">{fairnessSubtext}</p>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-slate-700">Hour Fairness</span>
+            <StatusPill status={health.fairnessStatus} />
           </div>
-          <StatusBadge status={health.fairnessStatus} />
+          <div className="mt-2 flex items-center gap-3">
+            <span className="text-2xl font-bold tracking-tight text-slate-900 tabular-nums">
+              {jainVal}
+            </span>
+            {jainPctNum !== null && (
+              <div className="h-2 flex-1 max-w-[100px] overflow-hidden rounded-full bg-slate-200">
+                <div
+                  className={`h-full rounded-full transition-all ${getTone(health.fairnessStatus).bar}`}
+                  style={{ width: `${jainPctNum}%` }}
+                />
+              </div>
+            )}
+          </div>
+          <p className="mt-1 text-xs font-medium leading-snug text-slate-600">{jainSub}</p>
         </div>
       </div>
     </section>

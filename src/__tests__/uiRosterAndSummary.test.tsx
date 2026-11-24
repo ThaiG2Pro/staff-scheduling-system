@@ -75,7 +75,9 @@ describe('Slice 4: Weekly Roster, AssignmentGuidancePopover & Pinning (AC-04)', 
     expect(screen.getByRole('button', { name: /^Unpin Alice Nguyen$/i })).toBeTruthy();
 
     // 2. Reassign pinned shift -> shows indigo notice and resets isPinned=false (E-05)
-    await user.click(screen.getByRole('button', { name: /^Alice Nguyen$/i }));
+    await user.click(
+      within(screen.getByRole('table')).getByRole('button', { name: /^Alice Nguyen$/i }),
+    );
     const reassignPopover = screen.getByRole('dialog');
     expect(
       within(reassignPopover).getByText(/Replacing a pinned shift starts as Unpinned/i),
@@ -147,5 +149,11 @@ describe('Slice 4: Schedule Health Bar & P0 Aggregated Summary 7x16 (AC-05)', ()
 
     expect(screen.getByText(/Focused from Hourly Summary:/i)).toBeTruthy();
     expect(screen.getByText(/Mon 07:00/i)).toBeTruthy();
+
+    // Run Auto-schedule and verify 1-click Undo Auto-schedule restores empty draft
+    await user.click(screen.getByRole('button', { name: /Auto-schedule/i }));
+    expect(screen.getByRole('button', { name: /Undo Auto-schedule/i })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: /Undo Auto-schedule/i }));
+    expect(screen.queryByRole('button', { name: /Undo Auto-schedule/i })).toBeNull();
   });
 });

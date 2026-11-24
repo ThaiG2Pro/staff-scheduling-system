@@ -1,9 +1,10 @@
 /**
- * @file Contextual Workspace Banners handling Auto-schedule Review (`E-04` Before → After delta),
- * Pin Conflict Guardrail (`E-03` with Highlight Conflicting Shifts button), and CSV/action notices.
+ * @file Contextual Workspace Banners handling Auto-schedule Review (`E-04` Before → After delta
+ * with 1-click Undo Auto-schedule), Pin Conflict Guardrail (`E-03` with Highlight button),
+ * and CSV/action notices.
  */
 
-import { AlertTriangle, CheckCircle2, Sparkles, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, RotateCcw, Sparkles, X } from 'lucide-react';
 import type { AutoScheduleDiagnostics, PinConflict } from '../../domain/types';
 
 export type WorkspaceBannerState =
@@ -28,6 +29,8 @@ export type WorkspaceBannerState =
 
 export interface ContextualBannersProps {
   banner: WorkspaceBannerState | null;
+  canUndoAutoSchedule: boolean;
+  onUndoAutoSchedule: () => void;
   onHighlightPinConflicts: (assignmentIds: string[]) => void;
   onKeepDraft: () => void;
   onDismiss: () => void;
@@ -37,11 +40,13 @@ export interface ContextualBannersProps {
  * Renders contextual feedback banners immediately beneath `ScheduleHealthBar`.
  * Hidden (`null`) when there is no active banner.
  *
- * @param props - Active banner payload and dismiss/highlight/keep callbacks.
+ * @param props - Active banner payload and undo/dismiss/highlight/keep callbacks.
  * @returns Banner element or `null`.
  */
 export function ContextualBanners({
   banner,
+  canUndoAutoSchedule,
+  onUndoAutoSchedule,
   onHighlightPinConflicts,
   onKeepDraft,
   onDismiss,
@@ -87,11 +92,21 @@ export function ContextualBanners({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {canUndoAutoSchedule && (
+              <button
+                type="button"
+                onClick={onUndoAutoSchedule}
+                className="inline-flex items-center gap-1 rounded-lg border border-indigo-300 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-900 hover:bg-indigo-100"
+              >
+                <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                Undo Auto-schedule
+              </button>
+            )}
             <button
               type="button"
               onClick={onKeepDraft}
-              className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700"
+              className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"
             >
               <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
               Keep draft

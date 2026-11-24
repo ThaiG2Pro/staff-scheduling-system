@@ -70,6 +70,7 @@ export function AssignmentChip({
       <div className="flex min-w-0 flex-1 items-center gap-1">
         <button
           type="button"
+          data-chip-reassign="true"
           onClick={onOpenReassign}
           title={`Reassign ${staffName}`}
           className="truncate text-left font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 rounded-xs"

@@ -1,15 +1,23 @@
 /**
- * @file Assignment Guidance Popover (`AC-04`, `E-05`, `E-06`, `E-07`) displaying pre-grouped
- * `Eligible` and `Requires attention` candidates from `evaluateStaffGuidance`, with auto-focused
- * Quick Search, Enter-to-assign, inline soft-override confirmation, and Pin reset notice.
+ * @file Viewport-aware Assignment Guidance Popover (`AC-04`, `E-05`, `E-06`, `E-07`)
+ * rendering pre-grouped `Eligible` and `Requires attention` candidates in a fixed overlay
+ * that never clips at table edges, with auto-focused Quick Search, inline soft-override
+ * confirmation, Pin reset notice, and quick Remove action in Reassign mode.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Info, Search, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Info, Search, Trash2, X } from 'lucide-react';
 import { DAY_LABELS } from '../../domain/constants';
 import { evaluateStaffGuidance } from '../../domain/constraints';
 import type { Assignment, DayOfWeek, ShiftTemplate, Staff } from '../../domain/types';
 import { formatShiftRange } from '../common/formatters';
+
+export interface PopoverAnchorRect {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}
 
 export interface AssignmentGuidancePopoverProps {
   day: DayOfWeek;
@@ -18,17 +26,47 @@ export interface AssignmentGuidancePopoverProps {
   shifts: readonly ShiftTemplate[];
   assignments: readonly Assignment[];
   unusedCapacityHours: number;
+  anchorRect: PopoverAnchorRect | null;
   reassigningAssignment?: Assignment | null;
   onSelectStaff: (staffId: string) => void;
+  onRemoveExisting?: (assignmentId: string) => void;
   onClose: () => void;
+}
+
+const POPOVER_WIDTH = 320;
+const POPOVER_EST_HEIGHT = 380;
+const VIEWPORT_MARGIN = 12;
+
+function computeFixedStyle(anchorRect: PopoverAnchorRect | null): React.CSSProperties {
+  if (!anchorRect || typeof window === 'undefined') {
+    return { top: 80, left: 24 };
+  }
+
+  const vw = window.innerWidth || 1280;
+  const vh = window.innerHeight || 800;
+
+  let left = anchorRect.left;
+  if (left + POPOVER_WIDTH > vw - VIEWPORT_MARGIN) {
+    left = Math.max(VIEWPORT_MARGIN, anchorRect.right - POPOVER_WIDTH);
+  }
+  if (left + POPOVER_WIDTH > vw - VIEWPORT_MARGIN) {
+    left = Math.max(VIEWPORT_MARGIN, vw - POPOVER_WIDTH - VIEWPORT_MARGIN);
+  }
+
+  let top = anchorRect.bottom + 6;
+  if (top + POPOVER_EST_HEIGHT > vh - VIEWPORT_MARGIN && anchorRect.top > POPOVER_EST_HEIGHT * 0.6) {
+    top = Math.max(VIEWPORT_MARGIN, anchorRect.top - POPOVER_EST_HEIGHT - 6);
+  }
+
+  return { top, left };
 }
 
 /**
  * Interactive popover for 2-click Assign or Reassign with proactive soft-warning guardrails.
- * Allows soft overrides via 1-tap inline confirmation without hard-blocking the Store Manager.
+ * Uses `position: fixed` with viewport collision clamping so Sat/Sun columns never clip.
  *
- * @param props - Target slot, schedule entities, optional reassign target, and selection callback.
- * @returns Guidance popover dialog.
+ * @param props - Target slot, schedule entities, anchor rect, optional reassign target, and callbacks.
+ * @returns Fixed guidance popover dialog.
  */
 export function AssignmentGuidancePopover({
   day,
@@ -37,8 +75,10 @@ export function AssignmentGuidancePopover({
   shifts,
   assignments,
   unusedCapacityHours,
+  anchorRect,
   reassigningAssignment = null,
   onSelectStaff,
+  onRemoveExisting,
   onClose,
 }: AssignmentGuidancePopoverProps) {
   const [query, setQuery] = useState('');
@@ -97,12 +137,19 @@ export function AssignmentGuidancePopover({
     ? staffList.find((s) => s.id === reassigningAssignment.staffId)?.name ?? 'Staff'
     : null;
 
+  const fixedStyle = useMemo(() => computeFixedStyle(anchorRect), [anchorRect]);
+
   return (
     <div
       ref={containerRef}
+      style={fixedStyle}
       role="dialog"
-      aria-label={isReassign ? `Reassign ${currentStaffName}` : `Assign staff to ${DAY_LABELS[day]} ${formatShiftRange(shift.startHour, shift.endHour)}`}
-      className="absolute left-0 top-full z-40 mt-1.5 w-80 rounded-xl border border-slate-300 bg-white shadow-xl"
+      aria-label={
+        isReassign
+          ? `Reassign ${currentStaffName}`
+          : `Assign staff to ${DAY_LABELS[day]} ${formatShiftRange(shift.startHour, shift.endHour)}`
+      }
+      className="fixed z-50 w-80 overflow-hidden rounded-xl border border-slate-300 bg-white shadow-2xl"
     >
       {/* Header */}
       <div className="flex items-start justify-between gap-2 border-b border-slate-200 px-3.5 py-2.5">
@@ -161,7 +208,7 @@ export function AssignmentGuidancePopover({
       </div>
 
       {/* Grouped Candidates */}
-      <div className="max-h-72 overflow-y-auto p-2 space-y-3">
+      <div className="max-h-64 space-y-3 overflow-y-auto p-2">
         {/* Eligible group */}
         <div>
           <p className="px-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-800">
@@ -169,7 +216,7 @@ export function AssignmentGuidancePopover({
           </p>
 
           {filteredEligible.length === 0 ? (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-[11px] text-slate-700">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-[11px] leading-snug text-slate-700">
               {guidance.eligible.length === 0 && unusedCapacityHours === 0 && staffList.length > 0
                 ? 'Team is at 100% weekly capacity — assigning anyone below will trigger an overtime warning, or consider adjusting shift hours / adding staff.'
                 : 'No eligible staff match.'}
@@ -183,14 +230,14 @@ export function AssignmentGuidancePopover({
                     onClick={() => onSelectStaff(opt.staff.id)}
                     className="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition hover:bg-emerald-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
                   >
-                    <span className="flex items-center gap-1.5 truncate font-medium text-slate-900">
+                    <span className="flex min-w-0 items-center gap-1.5 font-medium text-slate-900">
                       <CheckCircle2
                         className="h-3.5 w-3.5 shrink-0 text-emerald-700"
                         aria-hidden="true"
                       />
                       <span className="truncate">{opt.staff.name}</span>
                     </span>
-                    <span className="shrink-0 text-[11px] text-slate-600">
+                    <span className="shrink-0 whitespace-nowrap text-[11px] text-slate-600 tabular-nums">
                       {opt.currentAssignedHours}/{opt.staff.maxWeeklyHours}h ·{' '}
                       <strong>{opt.remainingHoursAfter}h left</strong>
                     </span>
@@ -220,17 +267,17 @@ export function AssignmentGuidancePopover({
                       onClick={() =>
                         setPendingOverrideId(isConfirming ? null : opt.staff.id)
                       }
-                      className="flex w-full flex-col gap-0.5 px-2.5 py-1.5 text-left text-xs hover:bg-amber-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600 rounded-lg"
+                      className="flex w-full flex-col gap-0.5 rounded-lg px-2.5 py-1.5 text-left text-xs hover:bg-amber-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600"
                     >
                       <div className="flex w-full items-center justify-between gap-2">
-                        <span className="flex items-center gap-1.5 truncate font-medium text-slate-900">
+                        <span className="flex min-w-0 items-center gap-1.5 font-medium text-slate-900">
                           <AlertTriangle
                             className="h-3.5 w-3.5 shrink-0 text-amber-700"
                             aria-hidden="true"
                           />
                           <span className="truncate">{opt.staff.name}</span>
                         </span>
-                        <span className="shrink-0 text-[11px] text-slate-700">
+                        <span className="shrink-0 text-[11px] text-slate-700 tabular-nums">
                           {opt.currentAssignedHours}/{opt.staff.maxWeeklyHours}h
                         </span>
                       </div>
@@ -242,7 +289,7 @@ export function AssignmentGuidancePopover({
                     </button>
 
                     {isConfirming && (
-                      <div className="flex items-center justify-between gap-2 border-t border-amber-200 bg-amber-100/70 px-2.5 py-1.5 rounded-b-lg">
+                      <div className="flex items-center justify-between gap-2 rounded-b-lg border-t border-amber-200 bg-amber-100/70 px-2.5 py-1.5">
                         <span className="text-[11px] font-medium text-amber-950">
                           Assign with warning?
                         </span>
@@ -271,6 +318,23 @@ export function AssignmentGuidancePopover({
           </div>
         )}
       </div>
+
+      {/* Quick remove footer in Reassign mode */}
+      {isReassign && onRemoveExisting && (
+        <div className="border-t border-slate-200 bg-slate-50 px-3.5 py-2">
+          <button
+            type="button"
+            onClick={() => {
+              onRemoveExisting(reassigningAssignment.id);
+              onClose();
+            }}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-700 hover:text-rose-800"
+          >
+            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+            Remove {currentStaffName} from shift
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -238,7 +238,7 @@ describe('Slice 3: Prepare Flows, Target N Round-trip & CSV Import (AC-01, AC-02
     expect(autoBtn).toHaveProperty('disabled', true);
 
     // Add a staff member via StaffFormModal (strictly 2 fields)
-    await user.click(screen.getByRole('button', { name: /^Add Staff$/i }));
+    await user.click(screen.getAllByRole('button', { name: /^Add Staff$/i })[0]!);
     const staffDialog = screen.getByRole('dialog');
     await user.type(within(staffDialog).getByLabelText(/Staff Name/i), 'Maya Lin');
     const hoursInput = within(staffDialog).getByLabelText(/Max Weekly Hours/i);

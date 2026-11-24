@@ -10,6 +10,7 @@ import {
   deriveScheduleViewModel,
 } from '../domain/derivedMetrics';
 import type {
+  Assignment,
   DayOfWeek,
   DeletePreview,
   Schedule,
@@ -34,6 +35,7 @@ import {
 import {
   assignStaffToShift,
   reassignStaff,
+  restoreAssignmentsSnapshot,
   togglePinAssignment,
   unassignStaff,
 } from './assignmentActions';
@@ -96,6 +98,7 @@ export interface ScheduleStore {
   unassignStaff: (scheduleId: string, assignmentId: string) => StateActionResult;
   reassignStaff: (scheduleId: string, assignmentId: string, newStaffId: string) => StateActionResult<{ assignmentId: string }>;
   togglePinAssignment: (scheduleId: string, assignmentId: string) => StateActionResult<{ isPinned: boolean }>;
+  restoreAssignments: (scheduleId: string, snapshot: readonly Assignment[]) => StateActionResult;
   importCsvToSchedule: (scheduleId: string, csvText: string, sourceFileName?: string) => CsvImportActionResult;
   runAutoScheduleForSchedule: (scheduleId: string) => AutoScheduleActionResult;
 }
@@ -271,6 +274,8 @@ export function useScheduleStore(
       runWritable((cur) => reassignStaff(cur, scheduleId, assignmentId, newStaffId, deps), () => scheduleId),
     togglePinAssignment: (scheduleId, assignmentId) =>
       runWritable((cur) => togglePinAssignment(cur, scheduleId, assignmentId, deps), () => scheduleId),
+    restoreAssignments: (scheduleId, snapshot) =>
+      runWritable((cur) => restoreAssignmentsSnapshot(cur, scheduleId, snapshot, deps), () => scheduleId),
     importCsvToSchedule: (scheduleId, csvText, sourceFileName) => {
       if (storageModeRef.current !== 'normal') return { ok: false, errors: [{ message: LOCKED_ERROR }] };
       const res = importCsvToSchedule(persistedRef.current, scheduleId, csvText, sourceFileName, deps);

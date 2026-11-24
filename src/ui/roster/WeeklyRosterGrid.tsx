@@ -1,11 +1,20 @@
 /**
  * @file Shift-first Weekly Roster Grid (`AC-04`) with 7 fixed `Mon–Sun` columns, severity-tiered
- * day & slot shortage indicators, inline `AssignmentChip` list, `AssignmentGuidancePopover`,
- * and click-to-focus highlight when jumping from `Hourly Summary`.
+ * day & slot shortage indicators, inline `AssignmentChip` list, viewport-safe fixed
+ * `AssignmentGuidancePopover`, Empty Schedule 3-Step Onboarding, and focused-hour jump highlight.
  */
 
-import { useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { useMemo, useState, type MouseEvent } from 'react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Pencil,
+  Plus,
+  Trash2,
+  Upload,
+  UserPlus,
+  X,
+} from 'lucide-react';
 import { DAYS_OF_WEEK, DAY_LABELS, OPERATING_HOURS } from '../../domain/constants';
 import type {
   AggregatedSummary,
@@ -18,7 +27,10 @@ import type {
 } from '../../domain/types';
 import { formatHour24, formatShiftRange } from '../common/formatters';
 import { AssignmentChip } from './AssignmentChip';
-import { AssignmentGuidancePopover } from './AssignmentGuidancePopover';
+import {
+  AssignmentGuidancePopover,
+  type PopoverAnchorRect,
+} from './AssignmentGuidancePopover';
 
 export interface FocusedRosterSlot {
   day: DayOfWeek;
@@ -29,6 +41,7 @@ export interface WeeklyRosterGridProps {
   shifts: readonly ShiftTemplate[];
   staff: readonly Staff[];
   assignments: readonly Assignment[];
+  hasDemand: boolean;
   summary: AggregatedSummary;
   assignmentWarnings: Record<string, AssignmentWarningFlags>;
   unusedCapacityHours: number;
@@ -43,6 +56,8 @@ export interface WeeklyRosterGridProps {
   onTogglePin: (assignmentId: string) => void;
   onRemove: (assignmentId: string) => void;
   onOpenManageShifts: () => void;
+  onOpenCsvImport: () => void;
+  onOpenAddStaff: () => void;
 }
 
 interface DayHeaderStatus {
@@ -59,8 +74,19 @@ interface SlotNeedStatus {
 }
 
 type ActivePopover =
-  | { mode: 'assign'; day: DayOfWeek; shiftId: string }
-  | { mode: 'reassign'; day: DayOfWeek; shiftId: string; assignment: Assignment };
+  | { mode: 'assign'; day: DayOfWeek; shift: ShiftTemplate; anchorRect: PopoverAnchorRect }
+  | {
+      mode: 'reassign';
+      day: DayOfWeek;
+      shift: ShiftTemplate;
+      assignment: Assignment;
+      anchorRect: PopoverAnchorRect;
+    };
+
+function captureRect(event: MouseEvent<HTMLElement>): PopoverAnchorRect {
+  const rect = event.currentTarget.getBoundingClientRect();
+  return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
+}
 
 function computeDayStatus(day: DayOfWeek, summary: AggregatedSummary): DayHeaderStatus {
   let gapCount = 0;
@@ -106,15 +132,16 @@ function computeSlotNeed(
 }
 
 /**
- * Interactive 7-day Shift-first Weekly Roster Grid with 2-click Assign/Reassign popover.
+ * Interactive 7-day Shift-first Weekly Roster Grid with viewport-safe 2-click Assign/Reassign popover.
  *
  * @param props - Shifts, staff, assignments, summary metrics, highlight states, and edit callbacks.
- * @returns Roster grid table.
+ * @returns Roster grid table or 3-step onboarding card for brand-new empty schedules.
  */
 export function WeeklyRosterGrid({
   shifts,
   staff,
   assignments,
+  hasDemand,
   summary,
   assignmentWarnings,
   unusedCapacityHours,
@@ -129,6 +156,8 @@ export function WeeklyRosterGrid({
   onTogglePin,
   onRemove,
   onOpenManageShifts,
+  onOpenCsvImport,
+  onOpenAddStaff,
 }: WeeklyRosterGridProps) {
   const [activePopover, setActivePopover] = useState<ActivePopover | null>(null);
 
@@ -187,10 +216,76 @@ export function WeeklyRosterGrid({
     );
   }
 
+  // Empty Schedule 3-Step Onboarding (brand-new schedule with neither CSV demand nor staff yet)
+  if (!hasDemand && staff.length === 0 && assignments.length === 0) {
+    return (
+      <div className="px-6 py-12 text-center">
+        <h3 className="text-base font-bold text-slate-900">
+          Get started with this week&apos;s schedule
+        </h3>
+        <p className="mt-1 text-xs text-slate-600">
+          Follow 3 quick steps to run Auto-schedule, or manage shifts anytime.
+        </p>
+
+        <div className="mx-auto mt-6 grid max-w-2xl grid-cols-1 gap-3.5 text-left sm:grid-cols-3">
+          <div className="flex flex-col justify-between rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div>
+              <div className="text-[11px] font-bold uppercase tracking-wider text-indigo-700">
+                Step 1
+              </div>
+              <div className="mt-1 text-sm font-semibold text-slate-900">Import CSV Demand</div>
+              <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                Upload 7-day hourly customer transactions (07:00–22:00).
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenCsvImport}
+              className="mt-3 inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-100"
+            >
+              <Upload className="h-3.5 w-3.5" aria-hidden="true" />
+              Import CSV
+            </button>
+          </div>
+
+          <div className="flex flex-col justify-between rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div>
+              <div className="text-[11px] font-bold uppercase tracking-wider text-indigo-700">
+                Step 2
+              </div>
+              <div className="mt-1 text-sm font-semibold text-slate-900">Add Staff</div>
+              <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                Add team members and their weekly hour limits.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenAddStaff}
+              className="mt-3 inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-100"
+            >
+              <UserPlus className="h-3.5 w-3.5" aria-hidden="true" />
+              Add Staff
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-indigo-700">
+              Step 3
+            </div>
+            <div className="mt-1 text-sm font-semibold text-slate-900">Run Auto-schedule</div>
+            <p className="mt-1 text-xs leading-relaxed text-slate-600">
+              Generate a balanced weekly draft, then pin and fine-tune shifts directly.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-2.5">
       {focusedSlot && (
-        <div className="mx-4 mt-3 flex items-center justify-between gap-2 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-xs text-indigo-950">
+        <div className="mx-4 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-xs text-indigo-950">
           <span>
             Focused from Hourly Summary:{' '}
             <strong>
@@ -210,7 +305,7 @@ export function WeeklyRosterGrid({
       )}
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[900px] border-collapse text-left">
+        <table className="w-full min-w-[920px] border-collapse text-left">
           <thead>
             <tr className="border-b border-slate-200 bg-slate-100">
               <th
@@ -228,7 +323,7 @@ export function WeeklyRosterGrid({
                   <th
                     key={day}
                     scope="col"
-                    className={`min-w-[116px] border-r border-slate-200 px-2.5 py-2 align-top last:border-r-0 ${
+                    className={`min-w-[118px] border-r border-slate-200 px-2.5 py-2 align-top last:border-r-0 ${
                       isFocusedDay
                         ? 'bg-indigo-100/80'
                         : isWeekend
@@ -236,26 +331,24 @@ export function WeeklyRosterGrid({
                           : 'bg-slate-100'
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="text-xs font-semibold text-slate-900">
-                        {DAY_LABELS[day]}
-                      </span>
+                    <div className="flex flex-wrap items-center justify-between gap-1">
+                      <span className="text-xs font-bold text-slate-900">{DAY_LABELS[day]}</span>
                       {status.hasDemand && status.gapCount > 0 ? (
-                        <span className="inline-flex items-center gap-0.5 rounded-full border border-rose-300 bg-rose-50 px-1.5 py-0.2 text-[10px] font-semibold text-rose-800">
+                        <span className="inline-flex items-center gap-0.5 whitespace-nowrap rounded-full border border-rose-300 bg-rose-50 px-1.5 py-0.2 text-[10px] font-semibold text-rose-800">
                           <AlertTriangle className="h-2.5 w-2.5" aria-hidden="true" />
                           {status.gapCount} gap{status.gapCount === 1 ? '' : 's'}
                         </span>
                       ) : status.hasDemand &&
                         (status.maxPeakNeed >= 2 || status.shortageHours >= 6) ? (
-                        <span className="rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.2 text-[10px] font-semibold text-amber-900">
+                        <span className="whitespace-nowrap rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.2 text-[10px] font-semibold text-amber-900">
                           Need {status.shortageHours}h
                         </span>
                       ) : status.hasDemand && status.shortageHours > 0 ? (
-                        <span className="rounded-full border border-slate-300 bg-white px-1.5 py-0.2 text-[10px] font-medium text-slate-700">
+                        <span className="whitespace-nowrap rounded-full border border-slate-300 bg-white px-1.5 py-0.2 text-[10px] font-medium text-slate-700">
                           Need {status.shortageHours}h
                         </span>
                       ) : status.hasDemand ? (
-                        <span className="inline-flex items-center gap-0.5 rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.2 text-[10px] font-medium text-emerald-800">
+                        <span className="inline-flex items-center gap-0.5 whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.2 text-[10px] font-medium text-emerald-800">
                           <CheckCircle2 className="h-2.5 w-2.5" aria-hidden="true" />
                           Covered
                         </span>
@@ -279,7 +372,7 @@ export function WeeklyRosterGrid({
                   >
                     <div className="flex items-start justify-between gap-1">
                       <div>
-                        <p className="text-xs font-semibold text-slate-900">
+                        <p className="whitespace-nowrap text-xs font-semibold text-slate-900">
                           {formatShiftRange(shift.startHour, shift.endHour)}
                         </p>
                         <p className="mt-0.5 text-[11px] text-slate-600">{duration}h shift</p>
@@ -319,11 +412,6 @@ export function WeeklyRosterGrid({
                       focusedSlot.hour >= shift.startHour &&
                       focusedSlot.hour < shift.endHour;
 
-                    const isPopoverInCell =
-                      activePopover !== null &&
-                      activePopover.day === day &&
-                      activePopover.shiftId === shift.id;
-
                     let addButtonClasses =
                       'border-slate-300/80 bg-white text-slate-600 opacity-75 hover:opacity-100 hover:border-indigo-400 hover:text-indigo-700';
                     let addButtonLabel = 'Add';
@@ -345,7 +433,7 @@ export function WeeklyRosterGrid({
                     return (
                       <td
                         key={day}
-                        className={`relative border-r border-slate-200 p-2 last:border-r-0 ${
+                        className={`border-r border-slate-200 p-2 last:border-r-0 ${
                           isFocusedCell
                             ? 'bg-indigo-50/70 ring-2 ring-inset ring-indigo-400'
                             : isWeekend
@@ -365,33 +453,57 @@ export function WeeklyRosterGrid({
                               (highlightedOverLimitOnly && !isOverHighlight);
 
                             return (
-                              <AssignmentChip
+                              <div
                                 key={assignment.id}
-                                assignment={assignment}
-                                staffName={staffNameMap.get(assignment.staffId) ?? 'Unknown'}
-                                warningFlags={flags}
-                                isHighlighted={isHighlighted}
-                                isDimmed={isDimmed}
-                                isPinConflict={conflictAssignmentIds.has(assignment.id)}
-                                isNewFromAuto={newAutoAssignmentIds.has(assignment.id)}
-                                onOpenReassign={() =>
-                                  setActivePopover({
-                                    mode: 'reassign',
-                                    day,
-                                    shiftId: shift.id,
-                                    assignment,
-                                  })
-                                }
-                                onTogglePin={() => onTogglePin(assignment.id)}
-                                onRemove={() => onRemove(assignment.id)}
-                              />
+                                onClick={(e) => {
+                                  const target = e.target as HTMLElement;
+                                  if (target.closest('button[data-chip-reassign="true"]')) {
+                                    setActivePopover({
+                                      mode: 'reassign',
+                                      day,
+                                      shift,
+                                      assignment,
+                                      anchorRect: captureRect(e),
+                                    });
+                                  }
+                                }}
+                              >
+                                <AssignmentChip
+                                  assignment={assignment}
+                                  staffName={staffNameMap.get(assignment.staffId) ?? 'Unknown'}
+                                  warningFlags={flags}
+                                  isHighlighted={isHighlighted}
+                                  isDimmed={isDimmed}
+                                  isPinConflict={conflictAssignmentIds.has(assignment.id)}
+                                  isNewFromAuto={newAutoAssignmentIds.has(assignment.id)}
+                                  onOpenReassign={() => {
+                                    // Anchor rect captured via wrapper click; fallback for keyboard Enter
+                                    if (!activePopover) {
+                                      setActivePopover({
+                                        mode: 'reassign',
+                                        day,
+                                        shift,
+                                        assignment,
+                                        anchorRect: { top: 180, bottom: 210, left: 240, right: 340 },
+                                      });
+                                    }
+                                  }}
+                                  onTogglePin={() => onTogglePin(assignment.id)}
+                                  onRemove={() => onRemove(assignment.id)}
+                                />
+                              </div>
                             );
                           })}
 
                           <button
                             type="button"
-                            onClick={() =>
-                              setActivePopover({ mode: 'assign', day, shiftId: shift.id })
+                            onClick={(e) =>
+                              setActivePopover({
+                                mode: 'assign',
+                                day,
+                                shift,
+                                anchorRect: captureRect(e),
+                              })
                             }
                             title={
                               need.shortageHoursList.length > 0
@@ -399,7 +511,7 @@ export function WeeklyRosterGrid({
                                 : `Assign staff to ${DAY_LABELS[day]} ${formatShiftRange(shift.startHour, shift.endHour)}`
                             }
                             aria-label={`Add staff to ${DAY_LABELS[day]} ${formatShiftRange(shift.startHour, shift.endHour)}`}
-                            className={`mt-auto inline-flex w-full items-center justify-center gap-1 rounded-md border border-dashed px-2 py-1 text-[11px] transition focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 ${addButtonClasses}`}
+                            className={`mt-auto inline-flex w-full items-center justify-center gap-1 whitespace-nowrap rounded-md border border-dashed px-2 py-1 text-[11px] transition focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 ${addButtonClasses}`}
                           >
                             {need.hasGap ? (
                               <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
@@ -409,29 +521,6 @@ export function WeeklyRosterGrid({
                             <span>{addButtonLabel}</span>
                           </button>
                         </div>
-
-                        {isPopoverInCell && (
-                          <AssignmentGuidancePopover
-                            day={day}
-                            shift={shift}
-                            staffList={staff}
-                            shifts={shifts}
-                            assignments={assignments}
-                            unusedCapacityHours={unusedCapacityHours}
-                            reassigningAssignment={
-                              activePopover.mode === 'reassign' ? activePopover.assignment : null
-                            }
-                            onSelectStaff={(staffId) => {
-                              if (activePopover.mode === 'reassign') {
-                                onReassign(activePopover.assignment.id, staffId);
-                              } else {
-                                onAssign(day, shift.id, staffId);
-                              }
-                              setActivePopover(null);
-                            }}
-                            onClose={() => setActivePopover(null)}
-                          />
-                        )}
                       </td>
                     );
                   })}
@@ -441,6 +530,32 @@ export function WeeklyRosterGrid({
           </tbody>
         </table>
       </div>
+
+      {/* Viewport-safe fixed Popover rendered outside table overflow container */}
+      {activePopover && (
+        <AssignmentGuidancePopover
+          day={activePopover.day}
+          shift={activePopover.shift}
+          staffList={staff}
+          shifts={shifts}
+          assignments={assignments}
+          unusedCapacityHours={unusedCapacityHours}
+          anchorRect={activePopover.anchorRect}
+          reassigningAssignment={
+            activePopover.mode === 'reassign' ? activePopover.assignment : null
+          }
+          onSelectStaff={(staffId) => {
+            if (activePopover.mode === 'reassign') {
+              onReassign(activePopover.assignment.id, staffId);
+            } else {
+              onAssign(activePopover.day, activePopover.shift.id, staffId);
+            }
+            setActivePopover(null);
+          }}
+          onRemoveExisting={(assignmentId) => onRemove(assignmentId)}
+          onClose={() => setActivePopover(null)}
+        />
+      )}
     </div>
   );
 }

@@ -1,12 +1,20 @@
 /**
  * @file Schedule Workspace Screen (`activeScheduleId !== null`) composing `TopActionBar`,
  * `ScheduleHealthBar`, `RecoveryBanner`, `ContextualBanners`, Tabbed Core View
- * (`WeeklyRosterGrid` | `AggregatedSummaryView`), sticky `StaffPanel`, and Prepare Modals.
+ * (`WeeklyRosterGrid` | `AggregatedSummaryView`), sticky `StaffPanel`, Floating Undo Toast
+ * (`Ctrl+Z`), and Prepare Modals.
  */
 
-import { useState } from 'react';
-import { BarChart3, CalendarDays } from 'lucide-react';
-import type { AutoScheduleResult, DayOfWeek, OperatingHour, Schedule, Staff } from '../../domain/types';
+import { useCallback, useEffect, useState } from 'react';
+import { BarChart3, CalendarDays, RotateCcw, X } from 'lucide-react';
+import type {
+  Assignment,
+  AutoScheduleResult,
+  DayOfWeek,
+  OperatingHour,
+  Schedule,
+  Staff,
+} from '../../domain/types';
 import type { ScheduleStore } from '../../state/useScheduleStore';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { formatTimestamp } from '../common/formatters';
@@ -28,10 +36,16 @@ export interface ScheduleWorkspaceScreenProps {
   schedule: Schedule;
 }
 
+interface UndoEntry {
+  label: string;
+  snapshot: Assignment[];
+}
+
 /**
  * Full interactive workspace for a single weekly store schedule.
- * Connects live derived metrics (`ScheduleHealthBar`, `AggregatedSummaryView`) with
- * direct roster editing (`WeeklyRosterGrid` + `AssignmentGuidancePopover`) and Prepare Flows.
+ * Connects live derived metrics (`ScheduleHealthBar`, `AggregatedSummaryView`), direct roster
+ * editing (`WeeklyRosterGrid` + `AssignmentGuidancePopover`), in-memory Undo Toast (`Ctrl+Z`),
+ * and Prepare Flows in a responsive, zero-clipping layout.
  *
  * @param props - Active `ScheduleStore` and resolved active `Schedule`.
  * @returns Workspace layout.
@@ -50,6 +64,9 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
     () => new Set(),
   );
 
+  const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
+  const [toastLabel, setToastLabel] = useState<string | null>(null);
+
   const [csvModalOpen, setCsvModalOpen] = useState(false);
   const [shiftsModalOpen, setShiftsModalOpen] = useState(false);
   const [staffModalState, setStaffModalState] = useState<{
@@ -67,7 +84,51 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
   const vmResult = store.activeViewModelResult;
   const viewModel = vmResult && vmResult.ok ? vmResult.viewModel : null;
 
+  const pushUndo = useCallback(
+    (label: string) => {
+      const snapshot = schedule.assignments.map((a) => ({ ...a }));
+      setUndoStack((prev) => [...prev.slice(-19), { label, snapshot }]);
+      setToastLabel(label);
+    },
+    [schedule.assignments],
+  );
+
+  const performUndo = useCallback(() => {
+    if (undoStack.length === 0) return;
+    const last = undoStack[undoStack.length - 1]!;
+    store.restoreAssignments(schedule.id, last.snapshot);
+    setUndoStack((prev) => prev.slice(0, -1));
+    setNewAutoAssignmentIds(new Set());
+    setConflictAssignmentIds(new Set());
+    setBanner((cur) => (cur?.kind === 'auto_review' ? null : cur));
+    setToastLabel(null);
+  }, [schedule.id, store, undoStack]);
+
+  // Auto-dismiss Undo Toast after 5 seconds
+  useEffect(() => {
+    if (!toastLabel) return;
+    const timer = window.setTimeout(() => setToastLabel(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [toastLabel]);
+
+  // Global Ctrl+Z / Cmd+Z keyboard shortcut when not typing in an input
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
+        const tag = (event.target as HTMLElement | null)?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        if (undoStack.length > 0) {
+          event.preventDefault();
+          performUndo();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undoStack.length, performUndo]);
+
   const handleRunAutoSchedule = () => {
+    const beforeSnapshot = schedule.assignments.map((a) => ({ ...a }));
     const beforeIds = new Set(schedule.assignments.map((a) => a.id));
     const beforeCov =
       viewModel?.health.demandCoverage?.ratio !== null &&
@@ -88,6 +149,11 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
           ? Math.round(result.diagnostics.demandCoverage * 100)
           : null;
 
+      setUndoStack((prev) => [
+        ...prev.slice(-19),
+        { label: 'Auto-schedule applied', snapshot: beforeSnapshot },
+      ]);
+      setToastLabel('Auto-schedule applied');
       setConflictAssignmentIds(new Set());
       setNewAutoAssignmentIds(addedIds);
       setActiveTab('roster');
@@ -124,6 +190,10 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
     setActiveTab('roster');
   };
 
+  const highlightedStaffName = highlightedStaffId
+    ? schedule.staff.find((s) => s.id === highlightedStaffId)?.name ?? null
+    : null;
+
   return (
     <div className="min-h-screen bg-[#E6ECF3] text-slate-900">
       <TopActionBar
@@ -140,7 +210,7 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
         onRequestDeleteSchedule={() => setDeleteScheduleOpen(true)}
       />
 
-      <main className="space-y-3.5 px-5 py-4">
+      <main className="mx-auto w-full max-w-[1680px] space-y-3.5 px-4 py-4 sm:px-5">
         <RecoveryBanner
           storageMode={store.storageMode}
           saveStatus={store.saveStatus}
@@ -177,6 +247,8 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
               ? { ...banner, afterGaps: viewModel.health.staffingGapCount }
               : banner
           }
+          canUndoAutoSchedule={undoStack.length > 0}
+          onUndoAutoSchedule={performUndo}
           onHighlightPinConflicts={(ids) => {
             setConflictAssignmentIds(new Set(ids));
             setActiveTab('roster');
@@ -191,24 +263,28 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
           }}
         />
 
-        {/* Main Split Workspace: Left ~75% Tabbed Core View, Right ~25% Sticky Team Panel */}
-        <div className="flex min-h-0 items-start gap-4">
-          <section className="min-w-0 flex-1 rounded-xl border border-slate-300/80 bg-white shadow-xs">
-            {/* Tab Bar */}
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 pt-2.5">
-              <div className="flex items-center gap-1" role="tablist" aria-label="Workspace views">
+        {/* Responsive Split Workspace: stacks cleanly below lg, side-by-side on desktop */}
+        <div className="flex min-h-0 flex-col items-start gap-4 lg:flex-row">
+          <section className="w-full min-w-0 flex-1 overflow-hidden rounded-xl border border-slate-300/80 bg-white shadow-xs">
+            {/* Sub-header Tabs & Roster Legend */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/80 px-4 py-2.5">
+              <div
+                className="inline-flex items-center gap-1 rounded-lg bg-slate-200/80 p-0.5"
+                role="tablist"
+                aria-label="Workspace views"
+              >
                 <button
                   type="button"
                   role="tab"
                   aria-selected={activeTab === 'roster'}
                   onClick={() => setActiveTab('roster')}
-                  className={`inline-flex items-center gap-1.5 border-b-2 px-3.5 py-2 text-sm font-medium transition ${
+                  className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition ${
                     activeTab === 'roster'
-                      ? 'border-indigo-600 text-indigo-700'
-                      : 'border-transparent text-slate-600 hover:text-slate-900'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  <CalendarDays className="h-4 w-4" aria-hidden="true" />
+                  <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />
                   Weekly Roster
                 </button>
                 <button
@@ -216,24 +292,56 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
                   role="tab"
                   aria-selected={activeTab === 'summary'}
                   onClick={() => setActiveTab('summary')}
-                  className={`inline-flex items-center gap-1.5 border-b-2 px-3.5 py-2 text-sm font-medium transition ${
+                  className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition ${
                     activeTab === 'summary'
-                      ? 'border-indigo-600 text-indigo-700'
-                      : 'border-transparent text-slate-600 hover:text-slate-900'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  <BarChart3 className="h-4 w-4" aria-hidden="true" />
+                  <BarChart3 className="h-3.5 w-3.5" aria-hidden="true" />
                   Hourly Summary (7×16)
                 </button>
               </div>
 
-              <div className="pb-2 text-xs text-slate-600">
-                {schedule.demand
-                  ? `Demand: ${schedule.demand.sourceFileName ?? 'Imported CSV'} (${formatTimestamp(
-                      schedule.demand.importedAt,
-                    )})`
-                  : 'No demand CSV imported yet'}
-              </div>
+              {activeTab === 'roster' ? (
+                <div className="flex flex-wrap items-center justify-end gap-x-3.5 gap-y-1.5 text-[11px] font-medium text-slate-700">
+                  <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                    <span className="h-3.5 w-1.5 rounded-full bg-indigo-600" aria-hidden="true" />
+                    Pinned
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                    <span className="h-3.5 w-1.5 rounded-full bg-amber-600" aria-hidden="true" />
+                    2+ shifts / overlap
+                  </span>
+                  <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                    <span className="rounded border border-rose-300 bg-rose-100 px-1 py-0.2 text-[9px] font-bold text-rose-800">
+                      OT
+                    </span>
+                    Over weekly cap
+                  </span>
+                  {highlightedStaffName && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-indigo-300 bg-indigo-100 px-2.5 py-0.5 font-semibold text-indigo-900">
+                      Showing {highlightedStaffName}
+                      <button
+                        type="button"
+                        onClick={() => setHighlightedStaffId(null)}
+                        aria-label="Clear staff highlight"
+                        className="ml-0.5 hover:text-indigo-950"
+                      >
+                        <X className="h-3 w-3" aria-hidden="true" />
+                      </button>
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div className="text-xs text-slate-600">
+                  {schedule.demand
+                    ? `Demand: ${schedule.demand.sourceFileName ?? 'Imported CSV'} (${formatTimestamp(
+                        schedule.demand.importedAt,
+                      )})`
+                    : 'No demand CSV imported yet'}
+                </div>
+              )}
             </div>
 
             {/* Active Tab Content */}
@@ -242,6 +350,7 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
                 shifts={schedule.shifts}
                 staff={schedule.staff}
                 assignments={schedule.assignments}
+                hasDemand={schedule.demand !== null}
                 summary={viewModel.summary}
                 assignmentWarnings={viewModel.assignmentWarnings}
                 unusedCapacityHours={viewModel.health.unusedCapacityHours}
@@ -252,22 +361,36 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
                 focusedSlot={focusedSlot}
                 onClearFocus={() => setFocusedSlot(null)}
                 onAssign={(day, shiftId, staffId) => {
+                  const memberName =
+                    schedule.staff.find((s) => s.id === staffId)?.name ?? 'Staff';
+                  pushUndo(`Assigned ${memberName}`);
                   store.assignStaffToShift(schedule.id, { day, shiftId, staffId });
                   setConflictAssignmentIds(new Set());
                 }}
                 onReassign={(assignmentId, newStaffId) => {
+                  const memberName =
+                    schedule.staff.find((s) => s.id === newStaffId)?.name ?? 'Staff';
+                  pushUndo(`Reassigned shift to ${memberName}`);
                   store.reassignStaff(schedule.id, assignmentId, newStaffId);
                   setConflictAssignmentIds(new Set());
                 }}
                 onTogglePin={(assignmentId) => {
+                  pushUndo('Updated shift pin');
                   store.togglePinAssignment(schedule.id, assignmentId);
                   setConflictAssignmentIds(new Set());
                 }}
                 onRemove={(assignmentId) => {
+                  const existing = schedule.assignments.find((a) => a.id === assignmentId);
+                  const memberName = existing
+                    ? schedule.staff.find((s) => s.id === existing.staffId)?.name ?? 'Staff'
+                    : 'Staff';
+                  pushUndo(`Removed ${memberName} from shift`);
                   store.unassignStaff(schedule.id, assignmentId);
                   setConflictAssignmentIds(new Set());
                 }}
                 onOpenManageShifts={() => setShiftsModalOpen(true)}
+                onOpenCsvImport={() => setCsvModalOpen(true)}
+                onOpenAddStaff={() => setStaffModalState({ open: true, editing: null })}
               />
             )}
 
@@ -295,6 +418,33 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
           />
         </div>
       </main>
+
+      {/* Floating Undo Toast (5s auto-dismiss + Ctrl+Z) */}
+      {toastLabel && undoStack.length > 0 && (
+        <div
+          role="status"
+          className="fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2.5 text-xs text-white shadow-2xl"
+        >
+          <span className="font-medium text-slate-100">{toastLabel}</span>
+          <button
+            type="button"
+            onClick={performUndo}
+            className="inline-flex items-center gap-1 rounded-lg bg-indigo-500 px-2.5 py-1 font-semibold text-white transition hover:bg-indigo-400"
+          >
+            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+            Undo
+          </button>
+          <span className="hidden text-[10px] text-slate-300 sm:inline">Ctrl+Z</span>
+          <button
+            type="button"
+            onClick={() => setToastLabel(null)}
+            aria-label="Dismiss undo toast"
+            className="p-0.5 text-slate-300 transition hover:text-white"
+          >
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      )}
 
       {/* Prepare Flow Modals */}
       <StaffFormModal

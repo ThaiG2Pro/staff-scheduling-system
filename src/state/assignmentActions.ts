@@ -181,3 +181,35 @@ export function togglePinAssignment(
     isPinned: nextPinned,
   };
 }
+
+/**
+ * Restores an in-memory snapshot of `assignments` for Undo (manual edit or Auto-schedule revert),
+ * filtering out any entries whose `staffId` or `shiftId` no longer exist in the schedule.
+ */
+export function restoreAssignmentsSnapshot(
+  state: Readonly<PersistedAppState>,
+  scheduleId: string,
+  snapshot: readonly Assignment[],
+  deps: ActionDeps = DEFAULT_ACTION_DEPS,
+): StateActionResult {
+  const schedule = findSchedule(state, scheduleId);
+  if (!schedule) return { ok: false, error: 'Schedule not found.' };
+
+  const validStaffIds = new Set(schedule.staff.map((st) => st.id));
+  const validShiftIds = new Set(schedule.shifts.map((sh) => sh.id));
+  const restored = snapshot
+    .filter((a) => validStaffIds.has(a.staffId) && validShiftIds.has(a.shiftId))
+    .map((a) => ({ ...a }));
+
+  const updated: Schedule = {
+    ...schedule,
+    updatedAt: deps.nowIso(),
+    assignments: restored,
+  };
+
+  return {
+    ok: true,
+    state: replaceSchedule(state, updated),
+    changed: true,
+  };
+}
