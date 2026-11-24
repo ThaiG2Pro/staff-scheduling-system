@@ -35,41 +35,58 @@ export function AggregatedSummaryView({
 }: AggregatedSummaryViewProps) {
   return (
     <div className="space-y-4 p-4">
-      {/* 4 Mandatory Weekly KPI Cards (P0) */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-          <p className="text-xs font-medium text-slate-600">Total Transactions</p>
-          <p className="mt-1 text-xl font-bold text-slate-900">
+      {/* 4 Mandatory Weekly Totals (Secondary Reference Strip — subordinate to Health Bar) */}
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-200 grid grid-cols-1 gap-px sm:grid-cols-2 xl:grid-cols-4">
+        <div className="bg-slate-50/90 px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+            Total Transactions
+          </p>
+          <p className="mt-1 text-xl font-bold text-slate-900 tabular-nums">
             {summary.totalTransactions !== null
               ? summary.totalTransactions.toLocaleString()
               : '–'}
           </p>
-          <p className="text-[11px] text-slate-600">Weekly customer transactions</p>
+          <p className="mt-0.5 text-[11px] text-slate-600">Weekly customer volume</p>
         </div>
 
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-          <p className="text-xs font-medium text-slate-600">Total Staff Hours</p>
-          <p className="mt-1 text-xl font-bold text-slate-900">
-            {summary.totalStaffHours}
-            <span className="ml-1 text-xs font-normal text-slate-600">hrs</span>
+        <div className="bg-slate-50/90 px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+            Total Staff Hours
           </p>
-          <p className="text-[11px] text-slate-600">Total scheduled staff-hours</p>
+          <p className="mt-1 text-xl font-bold text-slate-900 tabular-nums">
+            {summary.totalStaffHours}
+            <span className="ml-1 text-xs font-medium text-slate-600">hrs</span>
+          </p>
+          <p className="mt-0.5 text-[11px] text-slate-600">Total scheduled team hours</p>
         </div>
 
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-          <p className="text-xs font-medium text-slate-600">Overall Txns / Staff Hr</p>
-          <p className="mt-1 text-xl font-bold text-slate-900">
+        <div className="bg-slate-50/90 px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+            Overall Txns / Staff Hr
+          </p>
+          <p
+            className={`mt-1 text-xl font-bold tabular-nums ${
+              summary.overallTxnsPerStaffHour !== null &&
+              summary.overallTxnsPerStaffHour > targetN
+                ? 'text-amber-800'
+                : 'text-slate-900'
+            }`}
+          >
             {formatRate(summary.overallTxnsPerStaffHour)}
           </p>
-          <p className="text-[11px] text-slate-600">Total transactions ÷ Total staff hours</p>
+          <p className="mt-0.5 text-[11px] text-slate-600">
+            Total txns ÷ total staff hrs (Target ≤ {targetN})
+          </p>
         </div>
 
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-          <p className="text-xs font-medium text-slate-600">Average Txns / Staff Hr</p>
-          <p className="mt-1 text-xl font-bold text-slate-900">
+        <div className="bg-slate-50/90 px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+            Average Txns / Staff Hr
+          </p>
+          <p className="mt-1 text-xl font-bold text-slate-900 tabular-nums">
             {formatRate(summary.averageTxnsPerStaffHour)}
           </p>
-          <p className="text-[11px] text-slate-600">Avg per active hour (distinct from Overall)</p>
+          <p className="mt-0.5 text-[11px] text-slate-600">Mean load across staffed hours</p>
         </div>
       </div>
 

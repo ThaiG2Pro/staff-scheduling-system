@@ -310,9 +310,12 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
                     <span className="h-3.5 w-1.5 rounded-full bg-indigo-600" aria-hidden="true" />
                     Pinned
                   </span>
-                  <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                  <span
+                    title="Staff assigned 2+ shifts or overlapping hours on the same day"
+                    className="inline-flex cursor-help items-center gap-1.5 whitespace-nowrap"
+                  >
                     <span className="h-3.5 w-1.5 rounded-full bg-amber-600" aria-hidden="true" />
-                    2+ shifts / overlap
+                    Double-booked
                   </span>
                   <span className="inline-flex items-center gap-1 whitespace-nowrap">
                     <span className="rounded border border-rose-300 bg-rose-100 px-1 py-0.2 text-[9px] font-bold text-rose-800">
