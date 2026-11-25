@@ -80,6 +80,7 @@ export function AggregatedSummaryView({
   onJumpToRosterCell,
   onJumpToRosterDay,
 }: AggregatedSummaryViewProps) {
+  const [viewMode, setViewMode] = useState<'metrics' | 'coverage'>('metrics');
   const [activePeakIndex, setActivePeakIndex] = useState(0);
   const cellRefs = useRef<Record<string, HTMLTableCellElement | null>>({});
 
@@ -362,27 +363,85 @@ export function AggregatedSummaryView({
         </div>
       </div>
 
-      {/* Legend */}
+      {/* Legend & P1 Coverage View Toggle */}
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-700">
         <div className="flex flex-wrap items-center gap-3">
-          <span className="font-semibold text-slate-800">Cell lines:</span>
-          <span>1. Transactions</span>
-          <span>2. Staff hrs</span>
-          <span>3. Txns / staff hr (Target {targetN})</span>
+          <div
+            role="group"
+            aria-label="Summary view mode"
+            className="inline-flex rounded-lg border border-slate-300 bg-slate-100 p-0.5"
+          >
+            <button
+              type="button"
+              onClick={() => setViewMode('metrics')}
+              aria-pressed={viewMode === 'metrics'}
+              className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+                viewMode === 'metrics'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Metrics View
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('coverage')}
+              aria-pressed={viewMode === 'coverage'}
+              className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+                viewMode === 'coverage'
+                  ? 'bg-white text-indigo-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Coverage View
+            </button>
+          </div>
+
+          {viewMode === 'metrics' ? (
+            <>
+              <span className="font-semibold text-slate-800">Cell lines:</span>
+              <span>1. Transactions</span>
+              <span>2. Staff hrs</span>
+              <span>3. Txns / staff hr (Target {targetN})</span>
+            </>
+          ) : (
+            <>
+              <span className="font-semibold text-slate-800">Cell lines:</span>
+              <span>1. Scheduled / Required staff</span>
+              <span>2. Coverage delta (- / 0 / +)</span>
+            </>
+          )}
         </div>
-        <div className="flex flex-wrap items-center gap-2.5 text-[11px]">
-          <span className="inline-flex items-center gap-1 rounded border border-rose-300 bg-rose-50 px-2 py-0.5 font-medium text-rose-800">
-            <AlertTriangle className="h-3 w-3" aria-hidden="true" />
-            Gap (click to fix)
-          </span>
-          <span className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-2 py-0.5 font-medium text-amber-900">
-            <ArrowUpRight className="h-3 w-3" aria-hidden="true" />
-            High load (&gt;{targetN}/h)
-          </span>
-          <span className="inline-flex items-center gap-1 rounded border border-slate-300 bg-slate-100 px-2 py-0.5 font-medium text-slate-700">
-            – Idle (0/0)
-          </span>
-        </div>
+        {viewMode === 'metrics' ? (
+          <div className="flex flex-wrap items-center gap-2.5 text-[11px]">
+            <span className="inline-flex items-center gap-1 rounded border border-rose-300 bg-rose-50 px-2 py-0.5 font-medium text-rose-800">
+              <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+              Gap (click to fix)
+            </span>
+            <span className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-2 py-0.5 font-medium text-amber-900">
+              <ArrowUpRight className="h-3 w-3" aria-hidden="true" />
+              High load (&gt;{targetN}/h)
+            </span>
+            <span className="inline-flex items-center gap-1 rounded border border-slate-300 bg-slate-100 px-2 py-0.5 font-medium text-slate-700">
+              – Idle (0/0)
+            </span>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2.5 text-[11px]">
+            <span className="inline-flex items-center gap-1 rounded border border-rose-300 bg-rose-50 px-2 py-0.5 font-medium text-rose-800">
+              <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+              Shortage (&lt;0)
+            </span>
+            <span className="inline-flex items-center gap-1 rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 font-medium text-emerald-900">
+              <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+              Exact (0)
+            </span>
+            <span className="inline-flex items-center gap-1 rounded border border-sky-300 bg-sky-50 px-2 py-0.5 font-medium text-sky-900">
+              <ArrowUpRight className="h-3 w-3" aria-hidden="true" />
+              Surplus (&gt;0)
+            </span>
+          </div>
+        )}
       </div>
 
       {/* 7x16 Hourly Detail Matrix (P0: no daily total row) */}
@@ -450,41 +509,81 @@ export function AggregatedSummaryView({
                   const isActionable = isGap || isHighLoad;
 
                   const highLoadHeat =
-                    isHighLoad && cell.txnsPerStaffHour !== null
+                    viewMode === 'metrics' && isHighLoad && cell.txnsPerStaffHour !== null
                       ? getHighLoadHeatClasses(cell.txnsPerStaffHour, targetN)
                       : null;
 
-                  let cellBg = day >= 5 ? 'bg-slate-50/70' : 'bg-white';
-                  if (isGap) cellBg = 'bg-rose-100 hover:bg-rose-200/70';
-                  else if (highLoadHeat) cellBg = highLoadHeat.cellBg;
-                  else if (isZeroZero) cellBg = 'bg-slate-100/70';
+                  const delta = cell.coverageDelta;
+                  const isShortage = delta !== null && delta < 0;
+                  const isSurplus = delta !== null && delta > 0;
+                  const isExactCovered =
+                    delta === 0 && cell.requiredStaff !== null && cell.requiredStaff > 0;
 
-                  const content = (
-                    <div className="space-y-0.5 text-center leading-tight">
-                      <p className="text-[11px] font-medium text-slate-700">
-                        {cell.transactions !== null ? `${cell.transactions} txns` : '–'}
-                      </p>
-                      <p className="text-[11px] text-slate-600">{cell.staffHours} staff</p>
-                      {isGap ? (
-                        <p className="inline-flex items-center justify-center gap-0.5 text-[11px] font-bold text-rose-900">
-                          <AlertTriangle className="h-3 w-3" aria-hidden="true" />– (Gap)
+                  let cellBg = day >= 5 ? 'bg-slate-50/70' : 'bg-white';
+                  if (viewMode === 'coverage') {
+                    if (isGap || isShortage) cellBg = 'bg-rose-100 hover:bg-rose-200/70';
+                    else if (isExactCovered) cellBg = 'bg-emerald-50/80';
+                    else if (isSurplus) cellBg = 'bg-sky-50/80';
+                    else if (isZeroZero) cellBg = 'bg-slate-100/70';
+                  } else {
+                    if (isGap) cellBg = 'bg-rose-100 hover:bg-rose-200/70';
+                    else if (highLoadHeat) cellBg = highLoadHeat.cellBg;
+                    else if (isZeroZero) cellBg = 'bg-slate-100/70';
+                  }
+
+                  const content =
+                    viewMode === 'coverage' ? (
+                      <div className="space-y-0.5 text-center leading-tight">
+                        <p className="text-[11px] font-medium text-slate-700 tabular-nums">
+                          {cell.requiredStaff !== null
+                            ? `${cell.staffHours} / ${cell.requiredStaff}`
+                            : `${cell.staffHours} / –`}
                         </p>
-                      ) : highLoadHeat ? (
-                        <p
-                          className={`inline-flex items-center justify-center gap-0.5 text-[11px] font-bold ${highLoadHeat.textTone}`}
-                        >
-                          <ArrowUpRight className="h-3 w-3" aria-hidden="true" />
-                          {cell.txnsPerStaffHour!.toFixed(1)}/h
+                        {delta === null ? (
+                          <p className="text-[11px] font-medium text-slate-500">–</p>
+                        ) : isShortage ? (
+                          <p className="inline-flex items-center justify-center gap-0.5 text-[11px] font-bold text-rose-900 tabular-nums">
+                            <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                            {delta}
+                          </p>
+                        ) : isExactCovered ? (
+                          <p className="inline-flex items-center justify-center gap-0.5 text-[11px] font-bold text-emerald-900 tabular-nums">
+                            <CheckCircle2 className="h-3 w-3" aria-hidden="true" />0
+                          </p>
+                        ) : isSurplus ? (
+                          <p className="inline-flex items-center justify-center gap-0.5 text-[11px] font-semibold text-sky-900 tabular-nums">
+                            <ArrowUpRight className="h-3 w-3" aria-hidden="true" />+{delta}
+                          </p>
+                        ) : (
+                          <p className="text-[11px] font-medium text-slate-600">–</p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-0.5 text-center leading-tight">
+                        <p className="text-[11px] font-medium text-slate-700">
+                          {cell.transactions !== null ? `${cell.transactions} txns` : '–'}
                         </p>
-                      ) : cell.txnsPerStaffHour !== null ? (
-                        <p className="text-[11px] font-semibold text-slate-900">
-                          {cell.txnsPerStaffHour.toFixed(1)}/h
-                        </p>
-                      ) : (
-                        <p className="text-[11px] font-medium text-slate-600">–</p>
-                      )}
-                    </div>
-                  );
+                        <p className="text-[11px] text-slate-600">{cell.staffHours} staff</p>
+                        {isGap ? (
+                          <p className="inline-flex items-center justify-center gap-0.5 text-[11px] font-bold text-rose-900">
+                            <AlertTriangle className="h-3 w-3" aria-hidden="true" />– (Gap)
+                          </p>
+                        ) : highLoadHeat ? (
+                          <p
+                            className={`inline-flex items-center justify-center gap-0.5 text-[11px] font-bold ${highLoadHeat.textTone}`}
+                          >
+                            <ArrowUpRight className="h-3 w-3" aria-hidden="true" />
+                            {cell.txnsPerStaffHour!.toFixed(1)}/h
+                          </p>
+                        ) : cell.txnsPerStaffHour !== null ? (
+                          <p className="text-[11px] font-semibold text-slate-900">
+                            {cell.txnsPerStaffHour.toFixed(1)}/h
+                          </p>
+                        ) : (
+                          <p className="text-[11px] font-medium text-slate-600">–</p>
+                        )}
+                      </div>
+                    );
 
                   const cellKey = `${day}|${hour}`;
                   const isActivePeakCell =

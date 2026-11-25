@@ -194,5 +194,21 @@ describe('Slice 4: Schedule Health Bar & P0 Aggregated Summary 7x16 (AC-05)', ()
     const scopedPinBtn = screen.getByRole('button', { name: /^Pin all \(\d+\)$/i });
     await user.click(scopedPinBtn);
     expect(screen.getByRole('button', { name: /^Unpin \(\d+\)$/i })).toBeTruthy();
+
+    // P1 Coverage View toggle: switch to Coverage View and back to Metrics View (AC-05)
+    await user.click(screen.getByRole('tab', { name: /Hourly Summary/i }));
+    const coverageBtn = screen.getByRole('button', { name: /^Coverage View$/i });
+    const metricsBtn = screen.getByRole('button', { name: /^Metrics View$/i });
+    expect(metricsBtn.getAttribute('aria-pressed')).toBe('true');
+
+    await user.click(coverageBtn);
+    expect(coverageBtn.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByText(/1\. Scheduled \/ Required staff/i)).toBeTruthy();
+    expect(screen.getByText(/Shortage \(<0\)/i)).toBeTruthy();
+    expect(screen.getByText(/Exact \(0\)/i)).toBeTruthy();
+
+    await user.click(metricsBtn);
+    expect(metricsBtn.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByText(/1\. Transactions/i)).toBeTruthy();
   });
 });

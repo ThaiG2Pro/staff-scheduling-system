@@ -49,59 +49,98 @@ function findBestRebalanceMove(state: SchedulerWorkingState, currentJ: number): 
   const uLen = workingNew.length;
 
   let best: RebalanceMove | null = null;
+  let bestDeltaJ = REBALANCE_IMPROVE_EPS;
+  const invN = 1 / eligibleCount;
+
+  // Precompute per-staff scalars and 7-day occupancy bitmasks once per iteration
+  const invMax = new Float64Array(eligibleCount);
+  const uCurr = new Float64Array(eligibleCount);
+  const uCurrSq = new Float64Array(eligibleCount);
+  const dayMask = new Uint8Array(eligibleCount);
+  for (let s = 0; s < eligibleCount; s++) {
+    const inv = 1 / maxHours[s]!;
+    const u = assignedHours[s]! * inv;
+    invMax[s] = inv;
+    uCurr[s] = u;
+    uCurrSq[s] = u * u;
+    const base = s * 7;
+    let mask = 0;
+    for (let d = 0; d < 7; d++) {
+      if (dayOccupied[base + d] !== 0) mask |= 1 << d;
+    }
+    dayMask[s] = mask;
+  }
+
+  // Flat typed arrays avoid object property dereferencing inside the O(uLen^2) SWAP loop
+  const aDay = new Uint8Array(uLen);
+  const aDur = new Uint8Array(uLen);
+  const aStaff = new Int32Array(uLen);
+  for (let i = 0; i < uLen; i++) {
+    const a = workingNew[i]!;
+    aDay[i] = a.day;
+    aDur[i] = a.duration;
+    aStaff[i] = a.staffIdx;
+  }
 
   // 1) REASSIGN moves (scanned in stableKey ASC, staff.id ASC)
   for (let i = 0; i < uLen; i++) {
-    const a = workingNew[i]!;
-    const oldStaff = a.staffIdx;
+    const oldStaff = aStaff[i]!;
+    const day = aDay[i]!;
+    const dur = aDur[i]!;
+    const dayBit = 1 << day;
     const oldH = assignedHours[oldStaff]!;
-    const oldMax = maxHours[oldStaff]!;
-    const dur = a.duration;
+    const oldInvMax = invMax[oldStaff]!;
 
-    const oldUBefore = oldH / oldMax;
-    const oldUAfter = (oldH - dur) / oldMax;
+    const oldUBefore = uCurr[oldStaff]!;
+    const oldUAfter = (oldH - dur) * oldInvMax;
     const baseSumU = sumU - oldUBefore + oldUAfter;
-    const baseSumU2 = sumU2 - oldUBefore * oldUBefore + oldUAfter * oldUAfter;
+    const baseSumU2 = sumU2 - uCurrSq[oldStaff]! + oldUAfter * oldUAfter;
 
     for (let newStaff = 0; newStaff < eligibleCount; newStaff++) {
-      if (newStaff === oldStaff || dayOccupied[newStaff * 7 + a.day] !== 0) continue;
+      if (newStaff === oldStaff || (dayMask[newStaff]! & dayBit) !== 0) continue;
 
       const newH = assignedHours[newStaff]!;
       const newMax = maxHours[newStaff]!;
       if (newH + dur > newMax) continue;
 
-      const newUBefore = newH / newMax;
-      const newUAfter = (newH + dur) / newMax;
-      const candJ = computeJainFromSums(
-        baseSumU - newUBefore + newUAfter,
-        baseSumU2 - newUBefore * newUBefore + newUAfter * newUAfter,
-        eligibleCount,
-      );
+      const newUBefore = uCurr[newStaff]!;
+      const newUAfter = (newH + dur) * invMax[newStaff]!;
+      const candSumU = baseSumU - newUBefore + newUAfter;
+      const candSumU2 = baseSumU2 - uCurrSq[newStaff]! + newUAfter * newUAfter;
+      const candJ = candSumU2 <= 0 ? 1 : (candSumU * candSumU) * invN / candSumU2;
       const deltaJ = candJ - currentJ;
 
-      if (deltaJ > REBALANCE_IMPROVE_EPS && (best === null || deltaJ - best.deltaJ > JAIN_TIE_EPS)) {
+      if (deltaJ > bestDeltaJ && (best === null || deltaJ - best.deltaJ > JAIN_TIE_EPS)) {
         best = { moveType: 'REASSIGN', deltaJ, a1Idx: i, a2OrStaffIdx: newStaff };
+        bestDeltaJ = deltaJ;
       }
     }
   }
 
   // 2) SWAP moves (different durations, different staff; scanned in stableKey ASC)
   for (let i = 0; i < uLen; i++) {
-    const a1 = workingNew[i]!;
-    const s1 = a1.staffIdx;
-    const l1 = a1.duration;
+    const s1 = aStaff[i]!;
+    const d1 = aDay[i]!;
+    const l1 = aDur[i]!;
+    const d1Bit = 1 << d1;
+    const m1 = dayMask[s1]!;
     const h1 = assignedHours[s1]!;
     const max1 = maxHours[s1]!;
-    const u1Before = h1 / max1;
+    const invMax1 = invMax[s1]!;
+    const u1Before = uCurr[s1]!;
+    const u1BeforeSq = uCurrSq[s1]!;
+    const baseSumU1 = sumU - u1Before;
+    const baseSumU2_1 = sumU2 - u1BeforeSq;
 
     for (let j = i + 1; j < uLen; j++) {
-      const a2 = workingNew[j]!;
-      const l2 = a2.duration;
+      const l2 = aDur[j]!;
       if (l1 === l2) continue;
 
-      const s2 = a2.staffIdx;
+      const s2 = aStaff[j]!;
       if (s1 === s2) continue;
-      if (a1.day !== a2.day && (dayOccupied[s1 * 7 + a2.day] !== 0 || dayOccupied[s2 * 7 + a1.day] !== 0)) {
+
+      const d2 = aDay[j]!;
+      if (d1 !== d2 && ((m1 & (1 << d2)) !== 0 || (dayMask[s2]! & d1Bit) !== 0)) {
         continue;
       }
 
@@ -111,19 +150,16 @@ function findBestRebalanceMove(state: SchedulerWorkingState, currentJ: number): 
       const h2After = h2 - l2 + l1;
       if (h1After > max1 || h2After > max2) continue;
 
-      const u1After = h1After / max1;
-      const u2Before = h2 / max2;
-      const u2After = h2After / max2;
-
-      const candJ = computeJainFromSums(
-        sumU - u1Before + u1After - u2Before + u2After,
-        sumU2 - u1Before * u1Before + u1After * u1After - u2Before * u2Before + u2After * u2After,
-        eligibleCount,
-      );
+      const u1After = h1After * invMax1;
+      const u2After = h2After * invMax[s2]!;
+      const candSumU = baseSumU1 + u1After - uCurr[s2]! + u2After;
+      const candSumU2 = baseSumU2_1 + u1After * u1After - uCurrSq[s2]! + u2After * u2After;
+      const candJ = candSumU2 <= 0 ? 1 : (candSumU * candSumU) * invN / candSumU2;
       const deltaJ = candJ - currentJ;
 
-      if (deltaJ > REBALANCE_IMPROVE_EPS && (best === null || deltaJ - best.deltaJ > JAIN_TIE_EPS)) {
+      if (deltaJ > bestDeltaJ && (best === null || deltaJ - best.deltaJ > JAIN_TIE_EPS)) {
         best = { moveType: 'SWAP', deltaJ, a1Idx: i, a2OrStaffIdx: j };
+        bestDeltaJ = deltaJ;
       }
     }
   }
