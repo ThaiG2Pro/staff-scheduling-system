@@ -58,6 +58,7 @@ import {
   previewDeleteShiftInSchedule,
   previewDeleteStaffInSchedule,
   previewEditShiftInSchedule,
+  reorderShiftTemplates,
   updateShiftTemplate,
   updateStaff,
 } from './scheduleEntityActions';
@@ -95,6 +96,7 @@ export interface ScheduleStore {
   updateShiftTemplate: (scheduleId: string, shiftId: string, input: { startHour: number; endHour: number }) => StateActionResult;
   previewDeleteShift: (scheduleId: string, shiftId: string) => DeletePreview;
   deleteShiftTemplate: (scheduleId: string, shiftId: string) => StateActionResult<{ removedAssignmentsCount: number }>;
+  reorderShiftTemplates: (scheduleId: string, orderedShiftIds: readonly string[]) => StateActionResult;
   assignStaffToShift: (scheduleId: string, input: { day: DayOfWeek; shiftId: string; staffId: string }) => StateActionResult<{ assignmentId: string }>;
   unassignStaff: (scheduleId: string, assignmentId: string) => StateActionResult;
   reassignStaff: (scheduleId: string, assignmentId: string, newStaffId: string) => StateActionResult<{ assignmentId: string }>;
@@ -271,6 +273,8 @@ export function useScheduleStore(
       previewDeleteShiftInSchedule(persistedRef.current, scheduleId, shiftId),
     deleteShiftTemplate: (scheduleId, shiftId) =>
       runWritable((cur) => deleteShiftTemplate(cur, scheduleId, shiftId, deps), () => scheduleId),
+    reorderShiftTemplates: (scheduleId, orderedShiftIds) =>
+      runWritable((cur) => reorderShiftTemplates(cur, scheduleId, orderedShiftIds, deps), () => scheduleId),
     assignStaffToShift: (scheduleId, input) =>
       runWritable((cur) => assignStaffToShift(cur, scheduleId, input, deps), () => scheduleId),
     unassignStaff: (scheduleId, assignmentId) =>

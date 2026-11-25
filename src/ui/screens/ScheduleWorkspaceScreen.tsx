@@ -5,8 +5,9 @@
  * (`Ctrl+Z`), and Prepare Modals.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ArrowRight,
   BarChart3,
   CalendarDays,
   PanelRightClose,
@@ -14,6 +15,7 @@ import {
   Pin,
   PinOff,
   RotateCcw,
+  Scale,
   X,
 } from 'lucide-react';
 import type {
@@ -30,12 +32,15 @@ import { formatTimestamp } from '../common/formatters';
 import { CsvImportModal } from '../panels/CsvImportModal';
 import { ManageShiftsModal } from '../panels/ManageShiftsModal';
 import { StaffFormModal } from '../panels/StaffFormModal';
-import { StaffPanel } from '../panels/StaffPanel';
+import { StaffPanel, type StaffFilterMode, type StaffSortMode } from '../panels/StaffPanel';
 import { WeeklyRosterGrid, type FocusedRosterSlot } from '../roster/WeeklyRosterGrid';
-import { AggregatedSummaryView } from '../summary/AggregatedSummaryView';
+import {
+  AggregatedSummaryView,
+  type FocusedSummaryTarget,
+} from '../summary/AggregatedSummaryView';
 import { ContextualBanners, type WorkspaceBannerState } from '../workspace/ContextualBanners';
 import { RecoveryBanner } from '../workspace/RecoveryBanner';
-import { ScheduleHealthBar } from '../workspace/ScheduleHealthBar';
+import { ScheduleHealthBar, type ActiveKpiLens } from '../workspace/ScheduleHealthBar';
 import { TopActionBar } from '../workspace/TopActionBar';
 
 export type WorkspaceTab = 'roster' | 'summary';
@@ -62,9 +67,13 @@ interface UndoEntry {
 export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceScreenProps) {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('roster');
   const [teamPanelOpen, setTeamPanelOpen] = useState(true);
+  const [teamFilterMode, setTeamFilterMode] = useState<StaffFilterMode>('all');
+  const [teamSortMode, setTeamSortMode] = useState<StaffSortMode>('name');
   const [highlightedStaffId, setHighlightedStaffId] = useState<string | null>(null);
-  const [highlightedOverLimitOnly, setHighlightedOverLimitOnly] = useState(false);
+  const [activeKpiLens, setActiveKpiLens] = useState<ActiveKpiLens>(null);
   const [focusedSlot, setFocusedSlot] = useState<FocusedRosterSlot | null>(null);
+  const [focusedSummaryTarget, setFocusedSummaryTarget] =
+    useState<FocusedSummaryTarget | null>(null);
 
   const [banner, setBanner] = useState<WorkspaceBannerState | null>(null);
   const [conflictAssignmentIds, setConflictAssignmentIds] = useState<ReadonlySet<string>>(
@@ -121,7 +130,96 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
     return () => window.clearTimeout(timer);
   }, [toastLabel]);
 
-  // Global Ctrl+Z / Cmd+Z keyboard shortcut when not typing in an input
+  // Auto-clear KPI lenses when the underlying issue is resolved
+  const currentGapCount = viewModel?.health.staffingGapCount ?? 0;
+  const currentOverLimitCount = viewModel?.health.hourLimitWarningCount ?? 0;
+  const fairnessEligible =
+    viewModel?.health.fairnessJainIndex !== null &&
+    viewModel?.health.fairnessJainIndex !== undefined &&
+    !viewModel.health.isSingleEligibleStaff;
+
+  const fairnessExtremes = useMemo(() => {
+    if (!viewModel) return null;
+    const eligible = schedule.staff
+      .map((member) => {
+        const m = viewModel.staffMetrics[member.id];
+        const util = m?.utilization ?? null;
+        return util !== null
+          ? { staff: member, util, assignedHours: m?.assignedHours ?? 0 }
+          : null;
+      })
+      .filter((x): x is { staff: Staff; util: number; assignedHours: number } => x !== null);
+
+    if (eligible.length < 2) return null;
+
+    const sorted = [...eligible].sort((a, b) => {
+      if (b.util !== a.util) return b.util - a.util;
+      if (b.assignedHours !== a.assignedHours) return b.assignedHours - a.assignedHours;
+      return a.staff.name.localeCompare(b.staff.name);
+    });
+
+    const maxUtil = sorted[0]!.util;
+    const minUtil = sorted[sorted.length - 1]!.util;
+    const highestPct = Math.round(maxUtil * 100);
+    const lowestPct = Math.round(minUtil * 100);
+
+    if (Math.abs(maxUtil - minUtil) < 1e-9 || highestPct === lowestPct) {
+      return {
+        isBalanced: true as const,
+        balancedPct: highestPct,
+        highestList: [] as Staff[],
+        lowestList: [] as Staff[],
+        highestStaffIds: new Set<string>(),
+        lowestStaffIds: new Set<string>(),
+        highestPct,
+        lowestPct,
+      };
+    }
+
+    const highestList = sorted
+      .filter((item) => Math.abs(item.util - maxUtil) < 1e-9 || Math.round(item.util * 100) === highestPct)
+      .map((item) => item.staff);
+    const lowestList = sorted
+      .filter((item) => Math.abs(item.util - minUtil) < 1e-9 || Math.round(item.util * 100) === lowestPct)
+      .map((item) => item.staff);
+
+    return {
+      isBalanced: false as const,
+      balancedPct: null,
+      highestList,
+      lowestList,
+      highestStaffIds: new Set(highestList.map((s) => s.id)),
+      lowestStaffIds: new Set(lowestList.map((s) => s.id)),
+      highestPct,
+      lowestPct,
+    };
+  }, [schedule.staff, viewModel]);
+
+  const cycleHighlightGroup = (group: readonly Staff[]) => {
+    if (group.length === 0) return;
+    setHighlightedStaffId((prev) => {
+      if (group.length === 1) {
+        return prev === group[0]!.id ? null : group[0]!.id;
+      }
+      const idx = group.findIndex((s) => s.id === prev);
+      if (idx === -1) return group[0]!.id;
+      return group[(idx + 1) % group.length]!.id;
+    });
+  };
+
+  useEffect(() => {
+    if (activeKpiLens === 'gaps' && currentGapCount === 0) {
+      setActiveKpiLens(null);
+    } else if (activeKpiLens === 'over_limit' && currentOverLimitCount === 0) {
+      setActiveKpiLens(null);
+      setTeamFilterMode('all');
+    } else if (activeKpiLens === 'fairness' && !fairnessEligible) {
+      setActiveKpiLens(null);
+      setTeamSortMode('name');
+    }
+  }, [activeKpiLens, currentGapCount, currentOverLimitCount, fairnessEligible]);
+
+  // Global Ctrl+Z / Cmd+Z undo & Esc to clear active KPI lens
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
@@ -131,11 +229,24 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
           event.preventDefault();
           performUndo();
         }
+        return;
+      }
+
+      if (event.key === 'Escape' && (activeKpiLens !== null || focusedSummaryTarget !== null)) {
+        if (document.querySelector('[role="dialog"]')) return;
+        if (activeKpiLens === 'over_limit') {
+          setTeamFilterMode('all');
+        }
+        if (activeKpiLens === 'fairness') {
+          setTeamSortMode('name');
+        }
+        setActiveKpiLens(null);
+        setFocusedSummaryTarget(null);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [undoStack.length, performUndo]);
+  }, [undoStack.length, performUndo, activeKpiLens, focusedSummaryTarget]);
 
   const handleRunAutoSchedule = () => {
     const beforeSnapshot = schedule.assignments.map((a) => ({ ...a }));
@@ -195,8 +306,118 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
     setDeleteStaffTarget({ staff: member, affectedCount: preview.affectedAssignmentsCount });
   };
 
+  const clearPreviousLensSideEffects = (prevLens: ActiveKpiLens) => {
+    if (prevLens === 'over_limit') setTeamFilterMode('all');
+    if (prevLens === 'fairness') setTeamSortMode('name');
+  };
+
+  const handleInspectGaps = () => {
+    if (!schedule.demand) {
+      setCsvModalOpen(true);
+      return;
+    }
+    if (activeKpiLens === 'gaps') {
+      setActiveKpiLens(null);
+      return;
+    }
+    clearPreviousLensSideEffects(activeKpiLens);
+    setHighlightedStaffId(null);
+    setFocusedSlot(null);
+    setActiveKpiLens('gaps');
+    setActiveTab('roster');
+  };
+
+  const handleInspectHourLimitWarnings = () => {
+    if (activeKpiLens === 'over_limit') {
+      setActiveKpiLens(null);
+      setTeamFilterMode('all');
+      return;
+    }
+    clearPreviousLensSideEffects(activeKpiLens);
+    setHighlightedStaffId(null);
+    setFocusedSlot(null);
+    setActiveKpiLens('over_limit');
+    setTeamPanelOpen(true);
+    setTeamFilterMode('over_limit');
+    setActiveTab('roster');
+  };
+
+  const handleInspectCoverage = () => {
+    if (!schedule.demand) {
+      setCsvModalOpen(true);
+      return;
+    }
+    if (activeKpiLens === 'coverage') {
+      setActiveKpiLens(null);
+      return;
+    }
+    clearPreviousLensSideEffects(activeKpiLens);
+    setHighlightedStaffId(null);
+    setFocusedSlot(null);
+    setFocusedSummaryTarget(null);
+    setActiveKpiLens('coverage');
+    setActiveTab('summary');
+  };
+
+  const handleInspectFairness = () => {
+    if (activeKpiLens === 'fairness') {
+      setActiveKpiLens(null);
+      setTeamSortMode('name');
+      return;
+    }
+    clearPreviousLensSideEffects(activeKpiLens);
+    setHighlightedStaffId(null);
+    setFocusedSlot(null);
+    setFocusedSummaryTarget(null);
+    setActiveKpiLens('fairness');
+    setTeamPanelOpen(true);
+    setTeamFilterMode('all');
+    setTeamSortMode('utilization');
+    setActiveTab('roster');
+  };
+
   const handleJumpToRosterCell = (day: DayOfWeek, hour: OperatingHour) => {
+    setActiveKpiLens(null);
+    setFocusedSummaryTarget(null);
     setFocusedSlot({ day, hour });
+    setActiveTab('roster');
+  };
+
+  const handleJumpToRosterDay = (day: DayOfWeek) => {
+    setActiveKpiLens(null);
+    setFocusedSummaryTarget(null);
+    setFocusedSlot({ day });
+    setActiveTab('roster');
+  };
+
+  const handleBackToSummary = (slot: FocusedRosterSlot) => {
+    setFocusedSlot(null);
+    setActiveKpiLens(null);
+    setFocusedSummaryTarget(
+      slot.hour !== undefined
+        ? { kind: 'cell', day: slot.day, hour: slot.hour }
+        : { kind: 'day', day: slot.day },
+    );
+    setActiveTab('summary');
+  };
+
+  const handleInspectDayInSummary = (day: DayOfWeek) => {
+    if (activeKpiLens === 'over_limit') {
+      setTeamFilterMode('all');
+    }
+    setActiveKpiLens(null);
+    setFocusedSlot(null);
+    setFocusedSummaryTarget({ kind: 'day', day });
+    setActiveTab('summary');
+  };
+
+  const handleBackToRosterFromSummary = () => {
+    if (focusedSummaryTarget?.kind === 'cell') {
+      setFocusedSlot({ day: focusedSummaryTarget.day, hour: focusedSummaryTarget.hour });
+    } else if (focusedSummaryTarget?.kind === 'day') {
+      setFocusedSlot({ day: focusedSummaryTarget.day });
+    }
+    setFocusedSummaryTarget(null);
     setActiveTab('roster');
   };
 
@@ -261,12 +482,11 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
           <ScheduleHealthBar
             health={viewModel.health}
             staffMetrics={viewModel.staffMetrics}
-            onInspectGapsOrCoverage={() => setActiveTab('summary')}
-            onInspectHourLimitWarnings={() => {
-              setHighlightedStaffId(null);
-              setHighlightedOverLimitOnly((prev) => !prev);
-              setActiveTab('roster');
-            }}
+            activeLens={activeKpiLens}
+            onInspectGaps={handleInspectGaps}
+            onInspectHourLimitWarnings={handleInspectHourLimitWarnings}
+            onInspectCoverage={handleInspectCoverage}
+            onInspectFairness={handleInspectFairness}
           />
         )}
 
@@ -306,7 +526,10 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
                   type="button"
                   role="tab"
                   aria-selected={activeTab === 'roster'}
-                  onClick={() => setActiveTab('roster')}
+                  onClick={() => {
+                    if (activeKpiLens === 'coverage') setActiveKpiLens(null);
+                    setActiveTab('roster');
+                  }}
                   className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition ${
                     activeTab === 'roster'
                       ? 'bg-white text-slate-900 shadow-xs'
@@ -334,6 +557,22 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
 
               {activeTab === 'roster' ? (
                 <div className="flex flex-wrap items-center justify-end gap-2 text-[11px] font-medium text-slate-700">
+                  {activeKpiLens === 'over_limit' && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-rose-300 bg-rose-50 px-2.5 py-0.5 font-semibold text-rose-900">
+                      Filter: Over-limit staff ({currentOverLimitCount})
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveKpiLens(null);
+                          setTeamFilterMode('all');
+                        }}
+                        aria-label="Clear over-limit filter"
+                        className="ml-0.5 hover:text-rose-950"
+                      >
+                        <X className="h-3 w-3" aria-hidden="true" />
+                      </button>
+                    </span>
+                  )}
                   {highlightedStaffName && (
                     <span className="inline-flex items-center gap-1 rounded-full border border-indigo-300 bg-indigo-100 px-2.5 py-0.5 font-semibold text-indigo-900">
                       Showing {highlightedStaffName}
@@ -440,6 +679,109 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
               </div>
             )}
 
+            {/* Rebalance Lens Bar (KPI 4 — Hour Fairness) */}
+            {activeTab === 'roster' && activeKpiLens === 'fairness' && fairnessExtremes && (
+              <div
+                role="status"
+                className={`mx-4 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs ${
+                  fairnessExtremes.isBalanced
+                    ? 'border-emerald-300 bg-emerald-50 text-emerald-950'
+                    : 'border-indigo-300 bg-indigo-50 text-indigo-950'
+                }`}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <Scale
+                    className={`h-3.5 w-3.5 shrink-0 ${
+                      fairnessExtremes.isBalanced ? 'text-emerald-700' : 'text-indigo-700'
+                    }`}
+                    aria-hidden="true"
+                  />
+                  <span className="font-semibold">Rebalance lens:</span>
+                  {fairnessExtremes.isBalanced ? (
+                    <span>
+                      Team balanced — all active members are at{' '}
+                      <strong>{fairnessExtremes.balancedPct}%</strong> of weekly cap.
+                    </span>
+                  ) : (
+                    <>
+                      <span className="text-indigo-900">Team sorted by % used ·</span>
+                      {(() => {
+                        const activeHigh =
+                          fairnessExtremes.highestList.find((s) => s.id === highlightedStaffId) ??
+                          fairnessExtremes.highestList[0]!;
+                        const extraHigh = fairnessExtremes.highestList.length - 1;
+                        const isHighSelected =
+                          highlightedStaffId !== null &&
+                          fairnessExtremes.highestStaffIds.has(highlightedStaffId);
+
+                        const activeLow =
+                          fairnessExtremes.lowestList.find((s) => s.id === highlightedStaffId) ??
+                          fairnessExtremes.lowestList[0]!;
+                        const extraLow = fairnessExtremes.lowestList.length - 1;
+                        const isLowSelected =
+                          highlightedStaffId !== null &&
+                          fairnessExtremes.lowestStaffIds.has(highlightedStaffId);
+
+                        return (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => cycleHighlightGroup(fairnessExtremes.highestList)}
+                              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold transition ${
+                                isHighSelected
+                                  ? 'border-amber-600 bg-amber-600 text-white'
+                                  : 'border-amber-300 bg-amber-50 text-amber-950 hover:bg-amber-100'
+                              }`}
+                              title={
+                                extraHigh > 0
+                                  ? `Tied highest (${fairnessExtremes.highestList.map((s) => s.name).join(', ')}). Click to cycle.`
+                                  : "Click to highlight highest-utilized staff member's shifts"
+                              }
+                            >
+                              Highest: {activeHigh.name}
+                              {extraHigh > 0 ? ` +${extraHigh}` : ''} ({fairnessExtremes.highestPct}%)
+                            </button>
+                            <ArrowRight
+                              className="h-3 w-3 shrink-0 text-indigo-500"
+                              aria-hidden="true"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => cycleHighlightGroup(fairnessExtremes.lowestList)}
+                              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold transition ${
+                                isLowSelected
+                                  ? 'border-sky-700 bg-sky-700 text-white'
+                                  : 'border-sky-300 bg-sky-50 text-sky-950 hover:bg-sky-100'
+                              }`}
+                              title={
+                                extraLow > 0
+                                  ? `Tied lowest (${fairnessExtremes.lowestList.map((s) => s.name).join(', ')}). Click to cycle.`
+                                  : "Click to highlight lowest-utilized active staff member's shifts"
+                              }
+                            >
+                              Lowest: {activeLow.name}
+                              {extraLow > 0 ? ` +${extraLow}` : ''} ({fairnessExtremes.lowestPct}%)
+                            </button>
+                          </>
+                        );
+                      })()}
+                    </>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveKpiLens(null);
+                    setTeamSortMode('name');
+                  }}
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                >
+                  <X className="h-3 w-3" aria-hidden="true" />
+                  Clear lens
+                </button>
+              </div>
+            )}
+
             {/* Active Tab Content */}
             {viewModel && activeTab === 'roster' && (
               <WeeklyRosterGrid
@@ -451,11 +793,16 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
                 assignmentWarnings={viewModel.assignmentWarnings}
                 unusedCapacityHours={viewModel.health.unusedCapacityHours}
                 highlightedStaffId={highlightedStaffId}
-                highlightedOverLimitOnly={highlightedOverLimitOnly}
+                highlightedOverLimitOnly={activeKpiLens === 'over_limit'}
+                highlightGapsOnly={activeKpiLens === 'gaps'}
+                totalGapHours={currentGapCount}
+                onClearGapsLens={() => setActiveKpiLens(null)}
                 conflictAssignmentIds={conflictAssignmentIds}
                 newAutoAssignmentIds={newAutoAssignmentIds}
                 focusedSlot={focusedSlot}
                 onClearFocus={() => setFocusedSlot(null)}
+                onBackToSummary={handleBackToSummary}
+                onInspectDayInSummary={handleInspectDayInSummary}
                 onAssign={(day, shiftId, staffId) => {
                   const memberName =
                     schedule.staff.find((s) => s.id === staffId)?.name ?? 'Staff';
@@ -494,7 +841,13 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
               <AggregatedSummaryView
                 summary={viewModel.summary}
                 targetN={schedule.targetTxnsPerStaffHour}
+                highlightUnderstaffedOnly={activeKpiLens === 'coverage'}
+                onClearCoverageLens={() => setActiveKpiLens(null)}
+                focusedTarget={focusedSummaryTarget}
+                onClearFocusedTarget={() => setFocusedSummaryTarget(null)}
+                onBackToRoster={handleBackToRosterFromSummary}
                 onJumpToRosterCell={handleJumpToRosterCell}
+                onJumpToRosterDay={handleJumpToRosterDay}
               />
             )}
           </section>
@@ -504,8 +857,32 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
               staff={schedule.staff}
               staffMetrics={viewModel?.staffMetrics ?? {}}
               highlightedStaffId={highlightedStaffId}
+              filterMode={teamFilterMode}
+              onFilterModeChange={(mode) => {
+                setTeamFilterMode(mode);
+                if (activeKpiLens === 'over_limit' && mode !== 'over_limit') {
+                  setActiveKpiLens(null);
+                }
+              }}
+              sortMode={teamSortMode}
+              onSortModeChange={(mode) => {
+                setTeamSortMode(mode);
+                if (activeKpiLens === 'fairness' && mode !== 'utilization') {
+                  setActiveKpiLens(null);
+                }
+              }}
+              fairnessExtremes={
+                activeKpiLens === 'fairness' && fairnessExtremes && !fairnessExtremes.isBalanced
+                  ? {
+                      highestStaffIds: fairnessExtremes.highestStaffIds,
+                      lowestStaffIds: fairnessExtremes.lowestStaffIds,
+                    }
+                  : null
+              }
               onSelectStaff={(staffId) => {
-                setHighlightedOverLimitOnly(false);
+                if (activeKpiLens === 'gaps' || activeKpiLens === 'over_limit') {
+                  setActiveKpiLens(null);
+                }
                 setHighlightedStaffId(staffId);
                 if (staffId) setActiveTab('roster');
               }}
@@ -565,6 +942,7 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
         onUpdateShift={(shiftId, input) => store.updateShiftTemplate(schedule.id, shiftId, input)}
         onPreviewDeleteShift={(shiftId) => store.previewDeleteShift(schedule.id, shiftId)}
         onDeleteShift={(shiftId) => store.deleteShiftTemplate(schedule.id, shiftId)}
+        onReorderShifts={(orderedIds) => store.reorderShiftTemplates(schedule.id, orderedIds)}
         onClose={() => setShiftsModalOpen(false)}
       />
 

@@ -4,10 +4,14 @@
  * `AssignmentGuidancePopover`, Empty Schedule 3-Step Onboarding, and focused-hour jump highlight.
  */
 
-import { useMemo, useState, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import {
   AlertTriangle,
+  ArrowLeft,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  GripHorizontal,
   Pencil,
   Plus,
   Trash2,
@@ -34,7 +38,7 @@ import {
 
 export interface FocusedRosterSlot {
   day: DayOfWeek;
-  hour: OperatingHour;
+  hour?: OperatingHour;
 }
 
 export interface WeeklyRosterGridProps {
@@ -47,10 +51,15 @@ export interface WeeklyRosterGridProps {
   unusedCapacityHours: number;
   highlightedStaffId: string | null;
   highlightedOverLimitOnly: boolean;
+  highlightGapsOnly?: boolean;
+  totalGapHours?: number;
+  onClearGapsLens?: () => void;
   conflictAssignmentIds: ReadonlySet<string>;
   newAutoAssignmentIds: ReadonlySet<string>;
   focusedSlot: FocusedRosterSlot | null;
   onClearFocus: () => void;
+  onBackToSummary?: (slot: FocusedRosterSlot) => void;
+  onInspectDayInSummary?: (day: DayOfWeek) => void;
   onAssign: (day: DayOfWeek, shiftId: string, staffId: string) => void;
   onReassign: (assignmentId: string, newStaffId: string) => void;
   onTogglePin: (assignmentId: string) => void;
@@ -137,6 +146,26 @@ function computeSlotNeed(
  * @param props - Shifts, staff, assignments, summary metrics, highlight states, and edit callbacks.
  * @returns Roster grid table or 3-step onboarding card for brand-new empty schedules.
  */
+const DEFAULT_ROW_HEIGHT = 72;
+const ROOMY_ROW_HEIGHT = 144;
+const MIN_ROW_HEIGHT = 72;
+const MAX_ROW_HEIGHT = 280;
+const ROW_HEIGHT_STORAGE_KEY = 'staff-scheduling.roster-row-height';
+
+function readSavedRowHeight(): number {
+  try {
+    const raw = window.localStorage.getItem(ROW_HEIGHT_STORAGE_KEY);
+    if (!raw) return DEFAULT_ROW_HEIGHT;
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed >= MIN_ROW_HEIGHT && parsed <= MAX_ROW_HEIGHT) {
+      return Math.round(parsed);
+    }
+  } catch {
+    // Ignore storage access errors for non-critical UI preference
+  }
+  return DEFAULT_ROW_HEIGHT;
+}
+
 export function WeeklyRosterGrid({
   shifts,
   staff,
@@ -147,10 +176,15 @@ export function WeeklyRosterGrid({
   unusedCapacityHours,
   highlightedStaffId,
   highlightedOverLimitOnly,
+  highlightGapsOnly = false,
+  totalGapHours = 0,
+  onClearGapsLens,
   conflictAssignmentIds,
   newAutoAssignmentIds,
   focusedSlot,
   onClearFocus,
+  onBackToSummary,
+  onInspectDayInSummary,
   onAssign,
   onReassign,
   onTogglePin,
@@ -160,19 +194,52 @@ export function WeeklyRosterGrid({
   onOpenAddStaff,
 }: WeeklyRosterGridProps) {
   const [activePopover, setActivePopover] = useState<ActivePopover | null>(null);
+  const [activeGapIndex, setActiveGapIndex] = useState(0);
+  const [rowHeightPx, setRowHeightPx] = useState<number>(readSavedRowHeight);
+  const [isResizingRows, setIsResizingRows] = useState(false);
+  const cellRefs = useRef<Record<string, HTMLTableCellElement | null>>({});
+
+  const updateRowHeight = (next: number) => {
+    const clamped = Math.max(MIN_ROW_HEIGHT, Math.min(MAX_ROW_HEIGHT, Math.round(next)));
+    setRowHeightPx(clamped);
+    try {
+      window.localStorage.setItem(ROW_HEIGHT_STORAGE_KEY, String(clamped));
+    } catch {
+      // Ignore storage access errors
+    }
+  };
+
+  const handleRowResizeMouseDown = (event: MouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = rowHeightPx;
+    const rowCount = Math.max(1, orderedShifts.length);
+    setIsResizingRows(true);
+
+    const handleMove = (moveEvent: globalThis.MouseEvent) => {
+      const deltaY = moveEvent.clientY - startY;
+      // Divide by rowCount so the bottom resize handle tracks the mouse cursor 1:1
+      updateRowHeight(startHeight + deltaY / rowCount);
+    };
+
+    const handleUp = () => {
+      setIsResizingRows(false);
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+  };
 
   const staffNameMap = useMemo(
     () => new Map(staff.map((member) => [member.id, member.name])),
     [staff],
   );
 
-  const sortedShifts = useMemo(
-    () =>
-      [...shifts].sort((a, b) =>
-        a.startHour !== b.startHour ? a.startHour - b.startHour : a.endHour - b.endHour,
-      ),
-    [shifts],
-  );
+  // Preserve the manager's configured shift template order from Manage Shift Templates
+  const orderedShifts = shifts;
 
   const assignmentsByCell = useMemo(() => {
     const map = new Map<string, Assignment[]>();
@@ -197,7 +264,37 @@ export function WeeklyRosterGrid({
     [summary],
   );
 
-  if (sortedShifts.length === 0) {
+  const gapSlots = useMemo(() => {
+    const list: Array<{ key: string; day: DayOfWeek; shift: ShiftTemplate }> = [];
+    for (const day of DAYS_OF_WEEK) {
+      for (const shift of orderedShifts) {
+        const need = computeSlotNeed(day, shift, summary);
+        if (need.hasGap) {
+          list.push({ key: `${shift.id}|${day}`, day, shift });
+        }
+      }
+    }
+    return list;
+  }, [orderedShifts, summary]);
+
+  const safeGapIndex = gapSlots.length > 0 ? Math.min(activeGapIndex, gapSlots.length - 1) : 0;
+  const activeGapSlot = highlightGapsOnly && gapSlots.length > 0 ? gapSlots[safeGapIndex] ?? null : null;
+
+  useEffect(() => {
+    if (!highlightGapsOnly) {
+      setActiveGapIndex(0);
+      return;
+    }
+    if (activeGapSlot) {
+      cellRefs.current[activeGapSlot.key]?.scrollIntoView?.({
+        behavior: 'smooth',
+        block: 'nearest',
+        inline: 'nearest',
+      });
+    }
+  }, [highlightGapsOnly, activeGapSlot?.key]);
+
+  if (orderedShifts.length === 0) {
     return (
       <div className="px-6 py-12 text-center">
         <p className="text-sm font-semibold text-slate-800">No shift templates configured</p>
@@ -284,23 +381,104 @@ export function WeeklyRosterGrid({
 
   return (
     <div className="space-y-2.5">
+      {highlightGapsOnly && (
+        <div
+          role="status"
+          className="mx-4 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-xs text-rose-950"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-rose-600" aria-hidden="true" />
+            <span>
+              <strong>Gap focus:</strong> {gapSlots.length} shift slot
+              {gapSlots.length === 1 ? '' : 's'} covering{' '}
+              <strong>
+                {totalGapHours} unstaffed busy {totalGapHours === 1 ? 'hour' : 'hours'}
+              </strong>
+              {activeGapSlot && (
+                <>
+                  {' · '}
+                  <span className="font-semibold text-rose-900">
+                    {DAY_LABELS[activeGapSlot.day]}{' '}
+                    {formatShiftRange(activeGapSlot.shift.startHour, activeGapSlot.shift.endHour)}
+                  </span>{' '}
+                  ({safeGapIndex + 1}/{gapSlots.length})
+                </>
+              )}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {gapSlots.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setActiveGapIndex((prev) => (prev - 1 + gapSlots.length) % gapSlots.length)
+                  }
+                  aria-label="Previous gap slot"
+                  className="inline-flex items-center gap-0.5 rounded-md border border-rose-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-rose-800 hover:bg-rose-100"
+                >
+                  <ChevronLeft className="h-3 w-3" aria-hidden="true" />
+                  Prev
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveGapIndex((prev) => (prev + 1) % gapSlots.length)}
+                  aria-label="Next gap slot"
+                  className="inline-flex items-center gap-0.5 rounded-md border border-rose-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-rose-800 hover:bg-rose-100"
+                >
+                  Next
+                  <ChevronRight className="h-3 w-3" aria-hidden="true" />
+                </button>
+              </>
+            )}
+            {onClearGapsLens && (
+              <button
+                type="button"
+                onClick={onClearGapsLens}
+                className="inline-flex items-center gap-1 rounded-md border border-rose-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-rose-800 hover:bg-rose-100"
+              >
+                <X className="h-3 w-3" aria-hidden="true" />
+                Clear lens
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {focusedSlot && (
         <div className="mx-4 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-xs text-indigo-950">
           <span>
             Focused from Hourly Summary:{' '}
             <strong>
-              {DAY_LABELS[focusedSlot.day]} {formatHour24(focusedSlot.hour)}
+              {focusedSlot.hour !== undefined
+                ? `${DAY_LABELS[focusedSlot.day]} ${formatHour24(focusedSlot.hour)}`
+                : DAY_LABELS[focusedSlot.day]}
             </strong>{' '}
-            — shifts covering this hour are highlighted below.
+            —{' '}
+            {focusedSlot.hour !== undefined
+              ? 'shifts covering this hour are highlighted below.'
+              : 'all shifts on this day are highlighted below.'}
           </span>
-          <button
-            type="button"
-            onClick={onClearFocus}
-            className="inline-flex items-center gap-1 rounded-md border border-indigo-300 bg-white px-2 py-0.5 text-[11px] font-medium text-indigo-800 hover:bg-indigo-100"
-          >
-            <X className="h-3 w-3" aria-hidden="true" />
-            Clear focus
-          </button>
+          <div className="flex items-center gap-1.5">
+            {onBackToSummary && (
+              <button
+                type="button"
+                onClick={() => onBackToSummary(focusedSlot)}
+                className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-2.5 py-0.5 text-[11px] font-semibold text-white hover:bg-indigo-700"
+              >
+                <ArrowLeft className="h-3 w-3" aria-hidden="true" />
+                Back to Summary
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClearFocus}
+              className="inline-flex items-center gap-1 rounded-md border border-indigo-300 bg-white px-2 py-0.5 text-[11px] font-medium text-indigo-800 hover:bg-indigo-100"
+            >
+              <X className="h-3 w-3" aria-hidden="true" />
+              Clear focus
+            </button>
+          </div>
         </div>
       )}
 
@@ -329,7 +507,7 @@ export function WeeklyRosterGrid({
                   <th
                     key={day}
                     scope="col"
-                    className={`border-r border-slate-200 px-2 py-2 align-top last:border-r-0 ${
+                    className={`border-r border-slate-200 p-0 align-top last:border-r-0 ${
                       isFocusedDay
                         ? 'bg-indigo-100/80'
                         : isWeekend
@@ -337,32 +515,69 @@ export function WeeklyRosterGrid({
                           : 'bg-slate-100'
                     }`}
                   >
-                    <div className="flex flex-wrap items-center justify-between gap-1">
-                      <span className="text-xs font-bold text-slate-900">{DAY_LABELS[day]}</span>
-                      {status.hasDemand && status.gapCount > 0 ? (
-                        <span className="inline-flex items-center gap-0.5 whitespace-nowrap rounded-full bg-rose-600 px-1.5 py-0.2 text-[10px] font-semibold text-white">
-                          <AlertTriangle className="h-2.5 w-2.5" aria-hidden="true" />
-                          {status.gapCount} gap{status.gapCount === 1 ? '' : 's'}
+                    {onInspectDayInSummary ? (
+                      <button
+                        type="button"
+                        onClick={() => onInspectDayInSummary(day)}
+                        title={`Inspect ${DAY_LABELS[day]} hourly breakdown on Summary`}
+                        aria-label={`Inspect ${DAY_LABELS[day]} in Hourly Summary`}
+                        className="group flex w-full flex-wrap items-center justify-between gap-1 px-2 py-2 text-left transition hover:bg-indigo-100/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-600"
+                      >
+                        <span className="text-xs font-bold text-slate-900 group-hover:text-indigo-800">
+                          {DAY_LABELS[day]}
                         </span>
-                      ) : status.hasDemand && status.shortageHours >= 15 ? (
-                        <span className="whitespace-nowrap rounded-full bg-orange-600 px-1.5 py-0.2 text-[10px] font-semibold text-white">
-                          Need {status.shortageHours}h
-                        </span>
-                      ) : status.hasDemand && status.shortageHours >= 6 ? (
-                        <span className="whitespace-nowrap rounded-full bg-amber-500 px-1.5 py-0.2 text-[10px] font-semibold text-white">
-                          Need {status.shortageHours}h
-                        </span>
-                      ) : status.hasDemand && status.shortageHours > 0 ? (
-                        <span className="whitespace-nowrap rounded-full border border-amber-300 bg-amber-100 px-1.5 py-0.2 text-[10px] font-semibold text-amber-900">
-                          Need {status.shortageHours}h
-                        </span>
-                      ) : status.hasDemand ? (
-                        <span className="inline-flex items-center gap-0.5 whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.2 text-[10px] font-medium text-emerald-800">
-                          <CheckCircle2 className="h-2.5 w-2.5" aria-hidden="true" />
-                          OK
-                        </span>
-                      ) : null}
-                    </div>
+                        {status.hasDemand && status.gapCount > 0 ? (
+                          <span className="inline-flex items-center gap-0.5 whitespace-nowrap rounded-full bg-rose-600 px-1.5 py-0.2 text-[10px] font-semibold text-white">
+                            <AlertTriangle className="h-2.5 w-2.5" aria-hidden="true" />
+                            {status.gapCount} gap{status.gapCount === 1 ? '' : 's'}
+                          </span>
+                        ) : status.hasDemand && status.shortageHours >= 15 ? (
+                          <span className="whitespace-nowrap rounded-full bg-orange-600 px-1.5 py-0.2 text-[10px] font-semibold text-white">
+                            Need {status.shortageHours}h
+                          </span>
+                        ) : status.hasDemand && status.shortageHours >= 6 ? (
+                          <span className="whitespace-nowrap rounded-full bg-amber-500 px-1.5 py-0.2 text-[10px] font-semibold text-white">
+                            Need {status.shortageHours}h
+                          </span>
+                        ) : status.hasDemand && status.shortageHours > 0 ? (
+                          <span className="whitespace-nowrap rounded-full border border-amber-300 bg-amber-100 px-1.5 py-0.2 text-[10px] font-semibold text-amber-900">
+                            Need {status.shortageHours}h
+                          </span>
+                        ) : status.hasDemand ? (
+                          <span className="inline-flex items-center gap-0.5 whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.2 text-[10px] font-medium text-emerald-800">
+                            <CheckCircle2 className="h-2.5 w-2.5" aria-hidden="true" />
+                            OK
+                          </span>
+                        ) : null}
+                      </button>
+                    ) : (
+                      <div className="flex flex-wrap items-center justify-between gap-1 px-2 py-2">
+                        <span className="text-xs font-bold text-slate-900">{DAY_LABELS[day]}</span>
+                        {status.hasDemand && status.gapCount > 0 ? (
+                          <span className="inline-flex items-center gap-0.5 whitespace-nowrap rounded-full bg-rose-600 px-1.5 py-0.2 text-[10px] font-semibold text-white">
+                            <AlertTriangle className="h-2.5 w-2.5" aria-hidden="true" />
+                            {status.gapCount} gap{status.gapCount === 1 ? '' : 's'}
+                          </span>
+                        ) : status.hasDemand && status.shortageHours >= 15 ? (
+                          <span className="whitespace-nowrap rounded-full bg-orange-600 px-1.5 py-0.2 text-[10px] font-semibold text-white">
+                            Need {status.shortageHours}h
+                          </span>
+                        ) : status.hasDemand && status.shortageHours >= 6 ? (
+                          <span className="whitespace-nowrap rounded-full bg-amber-500 px-1.5 py-0.2 text-[10px] font-semibold text-white">
+                            Need {status.shortageHours}h
+                          </span>
+                        ) : status.hasDemand && status.shortageHours > 0 ? (
+                          <span className="whitespace-nowrap rounded-full border border-amber-300 bg-amber-100 px-1.5 py-0.2 text-[10px] font-semibold text-amber-900">
+                            Need {status.shortageHours}h
+                          </span>
+                        ) : status.hasDemand ? (
+                          <span className="inline-flex items-center gap-0.5 whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.2 text-[10px] font-medium text-emerald-800">
+                            <CheckCircle2 className="h-2.5 w-2.5" aria-hidden="true" />
+                            OK
+                          </span>
+                        ) : null}
+                      </div>
+                    )}
                   </th>
                 );
               })}
@@ -370,7 +585,7 @@ export function WeeklyRosterGrid({
           </thead>
 
           <tbody className="divide-y divide-slate-200">
-            {sortedShifts.map((shift) => {
+            {orderedShifts.map((shift) => {
               const duration = shift.endHour - shift.startHour;
               return (
                 <tr key={shift.id} className="align-top">
@@ -418,8 +633,14 @@ export function WeeklyRosterGrid({
                     const isFocusedCell =
                       focusedSlot !== null &&
                       focusedSlot.day === day &&
-                      focusedSlot.hour >= shift.startHour &&
-                      focusedSlot.hour < shift.endHour;
+                      (focusedSlot.hour === undefined ||
+                        (focusedSlot.hour >= shift.startHour &&
+                          focusedSlot.hour < shift.endHour));
+                    const isDimmedByDayFocus =
+                      !highlightGapsOnly &&
+                      focusedSlot !== null &&
+                      focusedSlot.hour === undefined &&
+                      focusedSlot.day !== day;
 
                     let addButtonClasses =
                       'border-slate-300/80 bg-white text-slate-600 opacity-75 hover:opacity-100 hover:border-indigo-400 hover:text-indigo-700';
@@ -443,18 +664,39 @@ export function WeeklyRosterGrid({
                       addButtonLabel = 'Need 1';
                     }
 
+                    const isActiveGapCell =
+                      highlightGapsOnly && activeGapSlot?.key === cellKey;
+                    const isGapLensCell = highlightGapsOnly && need.hasGap;
+                    const isDimmedByGapLens = highlightGapsOnly && !need.hasGap;
+
                     return (
                       <td
                         key={day}
-                        className={`border-r border-slate-200 p-1.5 last:border-r-0 ${
-                          isFocusedCell
-                            ? 'bg-indigo-50/70 ring-2 ring-inset ring-indigo-400'
-                            : isWeekend
-                              ? 'bg-slate-100/60'
-                              : 'bg-white'
+                        ref={(el) => {
+                          cellRefs.current[cellKey] = el;
+                        }}
+                        className={`border-r border-slate-200 p-1.5 last:border-r-0 transition-opacity ${
+                          isActiveGapCell
+                            ? 'bg-rose-100/80 ring-2 ring-inset ring-rose-600'
+                            : isGapLensCell
+                              ? 'bg-rose-50/70 ring-1 ring-inset ring-rose-400'
+                              : isFocusedCell
+                                ? 'bg-indigo-50/70 ring-2 ring-inset ring-indigo-400'
+                                : isWeekend
+                                  ? 'bg-slate-100/60'
+                                  : 'bg-white'
+                        } ${
+                          isDimmedByGapLens
+                            ? 'opacity-40 hover:opacity-100'
+                            : isDimmedByDayFocus
+                              ? 'opacity-45 hover:opacity-100'
+                              : ''
                         }`}
                       >
-                        <div className="flex min-h-[72px] flex-col gap-1.5">
+                        <div
+                          className="flex flex-col gap-1.5"
+                          style={{ minHeight: `${rowHeightPx}px` }}
+                        >
                           {cellAssignments.map((assignment) => {
                             const flags = assignmentWarnings[assignment.id];
                             const isStaffSelected = highlightedStaffId === assignment.staffId;
@@ -542,6 +784,45 @@ export function WeeklyRosterGrid({
             })}
           </tbody>
         </table>
+      </div>
+
+      {/* Bottom Mouse-Drag Row Height Resizer */}
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize roster row height"
+        aria-valuemin={MIN_ROW_HEIGHT}
+        aria-valuemax={MAX_ROW_HEIGHT}
+        aria-valuenow={rowHeightPx}
+        tabIndex={0}
+        onMouseDown={handleRowResizeMouseDown}
+        onDoubleClick={() =>
+          updateRowHeight(rowHeightPx > DEFAULT_ROW_HEIGHT + 12 ? DEFAULT_ROW_HEIGHT : ROOMY_ROW_HEIGHT)
+        }
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            updateRowHeight(rowHeightPx + 16);
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            updateRowHeight(rowHeightPx - 16);
+          }
+        }}
+        title="Drag up/down to resize shift row height (double-click to toggle compact/roomy)"
+        className={`group flex cursor-ns-resize select-none items-center justify-center gap-2 border-t border-slate-200 px-3 py-1 text-[11px] font-medium transition ${
+          isResizingRows
+            ? 'bg-indigo-50 text-indigo-800'
+            : 'bg-slate-50/80 text-slate-500 hover:bg-slate-100 hover:text-slate-800'
+        }`}
+      >
+        <GripHorizontal className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span>
+          {isResizingRows
+            ? `Row height: ${rowHeightPx}px`
+            : rowHeightPx > DEFAULT_ROW_HEIGHT
+              ? `Drag to resize rows (${rowHeightPx}px) · Double-click to reset`
+              : 'Drag down to expand shift cells · Double-click for roomy view'}
+        </span>
       </div>
 
       {/* Viewport-safe fixed Popover rendered outside table overflow container */}

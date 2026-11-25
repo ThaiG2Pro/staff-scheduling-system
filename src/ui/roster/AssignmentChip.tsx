@@ -66,12 +66,9 @@ export function AssignmentChip({
       ? 'bg-rose-50 border-rose-400 border-l-rose-600 text-rose-950 ring-2 ring-rose-500/70'
       : 'bg-rose-50 border-rose-300 border-l-rose-600 text-rose-950';
     overlayBg = 'bg-rose-50/95';
-  } else if (isDayConflict) {
-    surfaceClasses = 'bg-amber-50 border-amber-300 border-l-amber-500 text-amber-950';
-    overlayBg = 'bg-amber-50/95';
-  } else if (isOvertime) {
-    // Keep healthy emerald surface to avoid flooding the entire week in amber;
-    // highlight overtime quietly via amber left accent + compact inline OT tag.
+  } else if (isDayConflict || isOvertime) {
+    // Keep healthy emerald surface so amber/orange background stays reserved for Need cells;
+    // highlight workload warnings (2+ shifts / OT) via amber left accent + compact inline tags.
     surfaceClasses = 'bg-emerald-50/80 border-emerald-300/80 border-l-amber-500 text-emerald-950';
     overlayBg = 'bg-emerald-50/95';
   }

@@ -4,7 +4,18 @@
  */
 
 import { useEffect, useState, type FormEvent } from 'react';
-import { AlertTriangle, Check, Clock, Pencil, Plus, Trash2, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  Check,
+  Clock,
+  GripVertical,
+  Pencil,
+  Plus,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { MAX_SHIFT_END_HOUR, MIN_OPERATING_HOUR } from '../../domain/constants';
 import type { DeletePreview, ShiftTemplate } from '../../domain/types';
 import { ConfirmDialog } from '../common/ConfirmDialog';
@@ -21,6 +32,7 @@ export interface ManageShiftsModalProps {
   ) => { ok: boolean; error?: string };
   onPreviewDeleteShift: (shiftId: string) => DeletePreview;
   onDeleteShift: (shiftId: string) => { ok: boolean; error?: string };
+  onReorderShifts?: (orderedShiftIds: readonly string[]) => { ok: boolean; error?: string };
   onClose: () => void;
 }
 
@@ -50,6 +62,7 @@ export function ManageShiftsModal({
   onUpdateShift,
   onPreviewDeleteShift,
   onDeleteShift,
+  onReorderShifts,
   onClose,
 }: ManageShiftsModalProps) {
   const [newStart, setNewStart] = useState(10);
@@ -61,6 +74,9 @@ export function ManageShiftsModal({
   const [editEnd, setEditEnd] = useState(15);
   const [editError, setEditError] = useState<string | null>(null);
 
+  const [draggedShiftId, setDraggedShiftId] = useState<string | null>(null);
+  const [dragOverShiftId, setDragOverShiftId] = useState<string | null>(null);
+
   const [deleteTarget, setDeleteTarget] = useState<{
     shift: ShiftTemplate;
     affectedCount: number;
@@ -71,6 +87,8 @@ export function ManageShiftsModal({
     setAddError(null);
     setEditingId(null);
     setEditError(null);
+    setDraggedShiftId(null);
+    setDragOverShiftId(null);
     setDeleteTarget(null);
   }, [open]);
 
@@ -85,9 +103,28 @@ export function ManageShiftsModal({
 
   if (!open) return null;
 
-  const sortedShifts = [...shifts].sort((a, b) =>
-    a.startHour !== b.startHour ? a.startHour - b.startHour : a.endHour - b.endHour,
-  );
+  const canReorder = Boolean(onReorderShifts) && shifts.length > 1;
+
+  const moveShiftByStep = (index: number, delta: -1 | 1) => {
+    if (!onReorderShifts) return;
+    const targetIndex = index + delta;
+    if (targetIndex < 0 || targetIndex >= shifts.length) return;
+    const nextIds = shifts.map((sh) => sh.id);
+    const [moved] = nextIds.splice(index, 1);
+    nextIds.splice(targetIndex, 0, moved!);
+    onReorderShifts(nextIds);
+  };
+
+  const moveShiftByIds = (sourceId: string, targetId: string) => {
+    if (!onReorderShifts || sourceId === targetId) return;
+    const fromIndex = shifts.findIndex((sh) => sh.id === sourceId);
+    const toIndex = shifts.findIndex((sh) => sh.id === targetId);
+    if (fromIndex === -1 || toIndex === -1) return;
+    const nextIds = shifts.map((sh) => sh.id);
+    const [moved] = nextIds.splice(fromIndex, 1);
+    nextIds.splice(toIndex, 0, moved!);
+    onReorderShifts(nextIds);
+  };
 
   const handleAddSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -152,22 +189,72 @@ export function ManageShiftsModal({
           <div className="space-y-5 px-5 py-4">
             {/* Existing shifts */}
             <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-700">
-                Active Shifts ({sortedShifts.length})
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-700">
+                  Active Shifts ({shifts.length})
+                </p>
+                {canReorder && (
+                  <span className="text-[11px] text-slate-500">
+                    Drag or use arrows to reorder Roster rows
+                  </span>
+                )}
+              </div>
 
-              {sortedShifts.length === 0 ? (
+              {shifts.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center text-sm text-slate-600">
                   No shift templates defined. Add at least one shift between 07:00 and 23:00.
                 </div>
               ) : (
                 <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200">
-                  {sortedShifts.map((shift) => {
+                  {shifts.map((shift, index) => {
                     const isEditing = editingId === shift.id;
                     const duration = shift.endHour - shift.startHour;
+                    const isDragging = draggedShiftId === shift.id;
+                    const isDropTarget =
+                      dragOverShiftId === shift.id && draggedShiftId !== shift.id;
 
                     return (
-                      <li key={shift.id} className="px-3.5 py-3">
+                      <li
+                        key={shift.id}
+                        draggable={canReorder && !isEditing}
+                        onDragStart={(e) => {
+                          if (!canReorder || isEditing) return;
+                          setDraggedShiftId(shift.id);
+                          e.dataTransfer.effectAllowed = 'move';
+                          e.dataTransfer.setData('text/plain', shift.id);
+                        }}
+                        onDragOver={(e) => {
+                          if (!canReorder || !draggedShiftId || isEditing) return;
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = 'move';
+                          if (dragOverShiftId !== shift.id) {
+                            setDragOverShiftId(shift.id);
+                          }
+                        }}
+                        onDragLeave={() => {
+                          if (dragOverShiftId === shift.id) {
+                            setDragOverShiftId(null);
+                          }
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          const sourceId = draggedShiftId || e.dataTransfer.getData('text/plain');
+                          if (sourceId) moveShiftByIds(sourceId, shift.id);
+                          setDraggedShiftId(null);
+                          setDragOverShiftId(null);
+                        }}
+                        onDragEnd={() => {
+                          setDraggedShiftId(null);
+                          setDragOverShiftId(null);
+                        }}
+                        className={`px-3.5 py-3 transition ${
+                          isDragging
+                            ? 'bg-slate-50 opacity-60'
+                            : isDropTarget
+                              ? 'bg-indigo-50/70 ring-2 ring-inset ring-indigo-400'
+                              : ''
+                        }`}
+                      >
                         {isEditing ? (
                           <div className="space-y-2.5">
                             <div className="flex flex-wrap items-center gap-2">
@@ -247,15 +334,49 @@ export function ManageShiftsModal({
                           </div>
                         ) : (
                           <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <span className="text-sm font-semibold text-slate-900">
-                                {formatShiftRange(shift.startHour, shift.endHour)}
-                              </span>
-                              <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
-                                {duration}h
-                              </span>
+                            <div className="flex items-center gap-2">
+                              {canReorder && (
+                                <span
+                                  title="Drag to reorder"
+                                  className="cursor-grab text-slate-400 hover:text-slate-600 active:cursor-grabbing"
+                                >
+                                  <GripVertical className="h-4 w-4" aria-hidden="true" />
+                                </span>
+                              )}
+                              <div>
+                                <span className="text-sm font-semibold text-slate-900">
+                                  {formatShiftRange(shift.startHour, shift.endHour)}
+                                </span>
+                                <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
+                                  {duration}h
+                                </span>
+                              </div>
                             </div>
                             <div className="flex items-center gap-1.5">
+                              {canReorder && (
+                                <div className="mr-1 flex items-center gap-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => moveShiftByStep(index, -1)}
+                                    disabled={index === 0}
+                                    aria-label={`Move shift ${formatShiftRange(shift.startHour, shift.endHour)} up`}
+                                    title="Move up"
+                                    className="rounded-md border border-slate-300 bg-white p-1 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    <ArrowUp className="h-3.5 w-3.5" aria-hidden="true" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => moveShiftByStep(index, 1)}
+                                    disabled={index === shifts.length - 1}
+                                    aria-label={`Move shift ${formatShiftRange(shift.startHour, shift.endHour)} down`}
+                                    title="Move down"
+                                    className="rounded-md border border-slate-300 bg-white p-1 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />
+                                  </button>
+                                </div>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => startEdit(shift)}

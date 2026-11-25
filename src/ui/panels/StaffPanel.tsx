@@ -10,12 +10,20 @@ import { DAY_LABELS } from '../../domain/constants';
 import type { Staff, StaffMetrics } from '../../domain/types';
 
 export type StaffFilterMode = 'all' | 'under_cap' | 'over_limit';
-export type StaffSortMode = 'name' | 'hrs_left';
+export type StaffSortMode = 'name' | 'hrs_left' | 'utilization';
 
 export interface StaffPanelProps {
   staff: readonly Staff[];
   staffMetrics: Record<string, StaffMetrics>;
   highlightedStaffId: string | null;
+  filterMode?: StaffFilterMode;
+  onFilterModeChange?: (mode: StaffFilterMode) => void;
+  sortMode?: StaffSortMode;
+  onSortModeChange?: (mode: StaffSortMode) => void;
+  fairnessExtremes?: {
+    highestStaffIds: ReadonlySet<string>;
+    lowestStaffIds: ReadonlySet<string>;
+  } | null;
   onSelectStaff: (staffId: string | null) => void;
   onAddStaff: () => void;
   onEditStaff: (staff: Staff) => void;
@@ -59,14 +67,31 @@ export function StaffPanel({
   staff,
   staffMetrics,
   highlightedStaffId,
+  filterMode: controlledFilterMode,
+  onFilterModeChange,
+  sortMode: controlledSortMode,
+  onSortModeChange,
+  fairnessExtremes = null,
   onSelectStaff,
   onAddStaff,
   onEditStaff,
   onRequestDeleteStaff,
 }: StaffPanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterMode, setFilterMode] = useState<StaffFilterMode>('all');
-  const [sortMode, setSortMode] = useState<StaffSortMode>('name');
+  const [uncontrolledFilterMode, setUncontrolledFilterMode] = useState<StaffFilterMode>('all');
+  const [uncontrolledSortMode, setUncontrolledSortMode] = useState<StaffSortMode>('name');
+
+  const filterMode = controlledFilterMode ?? uncontrolledFilterMode;
+  const setFilterMode = (next: StaffFilterMode) => {
+    if (onFilterModeChange) onFilterModeChange(next);
+    else setUncontrolledFilterMode(next);
+  };
+
+  const sortMode = controlledSortMode ?? uncontrolledSortMode;
+  const setSortMode = (next: StaffSortMode) => {
+    if (onSortModeChange) onSortModeChange(next);
+    else setUncontrolledSortMode(next);
+  };
 
   const { totalAssigned, totalCapacity, underCapCount, overLimitCount } = useMemo(() => {
     let assigned = 0;
@@ -102,7 +127,18 @@ export function StaffPanel({
     });
 
     return [...filtered].sort((a, b) => {
-      if (sortMode === 'hrs_left') {
+      if (sortMode === 'utilization') {
+        const utilA =
+          staffMetrics[a.id]?.utilization ??
+          (a.maxWeeklyHours > 0 ? (staffMetrics[a.id]?.assignedHours ?? 0) / a.maxWeeklyHours : 0);
+        const utilB =
+          staffMetrics[b.id]?.utilization ??
+          (b.maxWeeklyHours > 0 ? (staffMetrics[b.id]?.assignedHours ?? 0) / b.maxWeeklyHours : 0);
+        if (utilB !== utilA) return utilB - utilA;
+        const hrsA = staffMetrics[a.id]?.assignedHours ?? 0;
+        const hrsB = staffMetrics[b.id]?.assignedHours ?? 0;
+        if (hrsB !== hrsA) return hrsB - hrsA;
+      } else if (sortMode === 'hrs_left') {
         const remA = staffMetrics[a.id]?.remainingHours ?? Math.max(0, a.maxWeeklyHours);
         const remB = staffMetrics[b.id]?.remainingHours ?? Math.max(0, b.maxWeeklyHours);
         if (remB !== remA) return remB - remA;
@@ -162,6 +198,7 @@ export function StaffPanel({
           >
             <option value="name">Sort: Name</option>
             <option value="hrs_left">Sort: Hrs left</option>
+            <option value="utilization">Sort: % Used</option>
           </select>
         </div>
 
@@ -271,6 +308,22 @@ export function StaffPanel({
                   </button>
 
                   <div className="flex shrink-0 items-center gap-1">
+                    {fairnessExtremes?.highestStaffIds.has(member.id) && (
+                      <span
+                        title="Highest utilization in active team"
+                        className="whitespace-nowrap rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900"
+                      >
+                        Highest
+                      </span>
+                    )}
+                    {fairnessExtremes?.lowestStaffIds.has(member.id) && (
+                      <span
+                        title="Lowest utilization in active team"
+                        className="whitespace-nowrap rounded-full border border-sky-300 bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-900"
+                      >
+                        Lowest
+                      </span>
+                    )}
                     {hasLocalWarn && (
                       <span title={localWarnTip} className="text-amber-700">
                         <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />

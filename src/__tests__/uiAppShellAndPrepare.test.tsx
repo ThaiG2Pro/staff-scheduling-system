@@ -248,14 +248,24 @@ describe('Slice 3: Prepare Flows, Target N Round-trip & CSV Import (AC-01, AC-02
 
     expect(screen.getByText('Maya Lin')).toBeTruthy();
 
-    // Open Manage Shifts Modal & add overlapping midday shift 10:00–14:00
+    // Open Manage Shifts Modal, add overlapping midday shift 10:00–14:00, and reorder it to top
     await user.click(screen.getByRole('button', { name: /^Shifts$/i }));
     const shiftsDialog = screen.getByRole('dialog');
     expect(within(shiftsDialog).getByText('07:00 – 15:00')).toBeTruthy();
     expect(within(shiftsDialog).getByText('15:00 – 23:00')).toBeTruthy();
     await user.click(within(shiftsDialog).getByRole('button', { name: /Add Shift/i }));
     expect(within(shiftsDialog).getByText('10:00 – 14:00')).toBeTruthy();
+
+    // Move 10:00 – 14:00 up twice so it becomes the first row on both modal and Weekly Roster
+    await user.click(within(shiftsDialog).getByRole('button', { name: /Move shift 10:00 – 14:00 up/i }));
+    await user.click(within(shiftsDialog).getByRole('button', { name: /Move shift 10:00 – 14:00 up/i }));
     await user.click(within(shiftsDialog).getByRole('button', { name: /^Done$/i }));
+
+    // Verify Weekly Roster rowheaders reflect the new custom order
+    const rowHeaders = screen.getAllByRole('rowheader').map((el) => el.textContent);
+    expect(rowHeaders[0]).toContain('10:00–14:00');
+    expect(rowHeaders[1]).toContain('07:00–15:00');
+    expect(rowHeaders[2]).toContain('15:00–23:00');
 
     // Import valid CSV via CsvImportModal
     await user.click(screen.getByRole('button', { name: /^Import CSV$/i }));

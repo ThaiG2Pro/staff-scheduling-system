@@ -15,14 +15,20 @@ import {
   Scale,
   TrendingUp,
   UserX,
+  X,
 } from 'lucide-react';
 import type { HealthStatus, ScheduleHealth, StaffMetrics } from '../../domain/types';
+
+export type ActiveKpiLens = 'gaps' | 'over_limit' | 'coverage' | 'fairness' | null;
 
 export interface ScheduleHealthBarProps {
   health: ScheduleHealth;
   staffMetrics?: Record<string, StaffMetrics>;
-  onInspectGapsOrCoverage: () => void;
+  activeLens?: ActiveKpiLens;
+  onInspectGaps: () => void;
   onInspectHourLimitWarnings: () => void;
+  onInspectCoverage: () => void;
+  onInspectFairness: () => void;
 }
 
 interface StatusStyle {
@@ -100,10 +106,22 @@ function StatusPill({ status }: { status: HealthStatus }) {
 export function ScheduleHealthBar({
   health,
   staffMetrics,
-  onInspectGapsOrCoverage,
+  activeLens = null,
+  onInspectGaps,
   onInspectHourLimitWarnings,
+  onInspectCoverage,
+  onInspectFairness,
 }: ScheduleHealthBarProps) {
   const hasDemand = health.staffingGapCount !== null;
+  const gapCount = health.staffingGapCount ?? 0;
+  const gapLensActive = activeLens === 'gaps';
+  const overLimitLensActive = activeLens === 'over_limit';
+  const coverageLensActive = activeLens === 'coverage';
+  const fairnessLensActive = activeLens === 'fairness';
+  const gapDisabled = hasDemand && gapCount === 0 && !gapLensActive;
+  const fairnessDisabled =
+    (health.fairnessJainIndex === null || health.isSingleEligibleStaff) && !fairnessLensActive;
+
   const gapStyle = getStatusStyle(health.staffingGapStatus);
   const hlStyle = getStatusStyle(health.hourLimitWarningStatus);
   const covStyle = getStatusStyle(health.demandCoverageStatus);
@@ -129,6 +147,7 @@ export function ScheduleHealthBar({
 
   const cardBase =
     'group relative flex min-w-0 flex-col justify-between rounded-xl border border-slate-300/80 border-l-4 bg-white px-4 py-3.5 text-left shadow-xs transition';
+  const activeLensClasses = 'ring-2 ring-indigo-600 border-indigo-300 bg-indigo-50/25 shadow-sm';
 
   return (
     <section
@@ -138,9 +157,21 @@ export function ScheduleHealthBar({
       {/* KPI 1: Staffing Gaps */}
       <button
         type="button"
-        onClick={onInspectGapsOrCoverage}
-        title="Operating hours with customer transactions > 0 and 0 staff scheduled. Click to inspect Hourly Summary."
-        className={`${cardBase} ${gapStyle.accent} hover:border-slate-400 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600`}
+        onClick={onInspectGaps}
+        disabled={gapDisabled}
+        aria-pressed={gapLensActive}
+        title={
+          !hasDemand
+            ? 'No demand CSV loaded yet. Click to import demand CSV.'
+            : gapCount === 0
+              ? 'All operating hours with customer demand have at least 1 staff scheduled.'
+              : gapLensActive
+                ? 'Gap focus lens active. Click to clear.'
+                : 'Operating hours with customer transactions > 0 and 0 staff scheduled. Click to focus gap slots on Weekly Roster.'
+        }
+        className={`${cardBase} ${gapStyle.accent} ${
+          gapLensActive ? activeLensClasses : ''
+        } enabled:hover:border-slate-400 enabled:hover:shadow-sm disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600`}
       >
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
@@ -170,13 +201,27 @@ export function ScheduleHealthBar({
         </div>
 
         <div className="mt-2 flex items-center justify-between gap-1 text-xs font-medium text-slate-600">
-          <span className="leading-snug">
-            {!hasDemand ? 'Import CSV to evaluate' : 'Busy hours with 0 staff'}
+          <span className={`leading-snug ${gapLensActive ? 'font-semibold text-indigo-700' : ''}`}>
+            {!hasDemand
+              ? 'Click to import CSV'
+              : gapLensActive
+                ? 'Active lens · Click to clear'
+                : gapCount === 0
+                  ? 'No busy hours unstaffed'
+                  : 'Click to focus gap slots'}
           </span>
-          <ChevronRight
-            className="h-3.5 w-3.5 shrink-0 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-indigo-600"
-            aria-hidden="true"
-          />
+          {gapLensActive ? (
+            <X className="h-3.5 w-3.5 shrink-0 text-indigo-600" aria-hidden="true" />
+          ) : !gapDisabled ? (
+            <ChevronRight
+              className={`h-3.5 w-3.5 shrink-0 transition group-hover:translate-x-0.5 ${
+                hasDemand && gapCount > 0
+                  ? 'text-rose-500'
+                  : 'text-slate-400 group-hover:text-indigo-600'
+              }`}
+              aria-hidden="true"
+            />
+          ) : null}
         </div>
       </button>
 
@@ -184,9 +229,18 @@ export function ScheduleHealthBar({
       <button
         type="button"
         onClick={onInspectHourLimitWarnings}
-        disabled={health.hourLimitWarningCount === 0}
-        title="Team members exceeding their weekly hour cap. Click to highlight on Weekly Roster."
-        className={`${cardBase} ${hlStyle.accent} enabled:hover:border-slate-400 enabled:hover:shadow-sm disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600`}
+        disabled={health.hourLimitWarningCount === 0 && !overLimitLensActive}
+        aria-pressed={overLimitLensActive}
+        title={
+          health.hourLimitWarningCount === 0
+            ? 'All team members are within their weekly hour limits.'
+            : overLimitLensActive
+              ? 'Over-limit lens active. Click to clear.'
+              : 'Team members exceeding their weekly hour cap. Click to highlight shifts and filter Team panel.'
+        }
+        className={`${cardBase} ${hlStyle.accent} ${
+          overLimitLensActive ? activeLensClasses : ''
+        } enabled:hover:border-slate-400 enabled:hover:shadow-sm disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600`}
       >
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
@@ -212,26 +266,41 @@ export function ScheduleHealthBar({
         </div>
 
         <div className="mt-2 flex items-center justify-between gap-1 text-xs font-medium text-slate-600">
-          <span className="leading-snug">
-            {health.hourLimitWarningCount === 0
-              ? 'All within weekly limits'
-              : 'Click to highlight over-limit staff'}
+          <span
+            className={`leading-snug ${overLimitLensActive ? 'font-semibold text-indigo-700' : ''}`}
+          >
+            {overLimitLensActive
+              ? 'Active lens · Click to clear'
+              : health.hourLimitWarningCount === 0
+                ? 'All within weekly limits'
+                : 'Click to filter over-limit staff'}
           </span>
-          {health.hourLimitWarningCount > 0 && (
+          {overLimitLensActive ? (
+            <X className="h-3.5 w-3.5 shrink-0 text-indigo-600" aria-hidden="true" />
+          ) : health.hourLimitWarningCount > 0 ? (
             <ChevronRight
               className="h-3.5 w-3.5 shrink-0 text-rose-500 transition group-hover:translate-x-0.5"
               aria-hidden="true"
             />
-          )}
+          ) : null}
         </div>
       </button>
 
       {/* KPI 3: Demand Coverage */}
       <button
         type="button"
-        onClick={onInspectGapsOrCoverage}
-        title="Share of hourly staffing demand covered (≥90% Good, 75–<90% Attention, <75% Warning). Click to view Hourly Summary."
-        className={`${cardBase} ${covStyle.accent} hover:border-slate-400 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600`}
+        onClick={onInspectCoverage}
+        aria-pressed={coverageLensActive}
+        title={
+          covRatio === null
+            ? 'No demand CSV loaded yet. Click to import demand CSV.'
+            : coverageLensActive
+              ? 'Coverage focus lens active on Hourly Summary. Click to clear.'
+              : 'Share of hourly staffing demand covered (≥90% Good, 75–<90% Attention, <75% Warning). Click to focus understaffed peak hours on Hourly Summary.'
+        }
+        className={`${cardBase} ${covStyle.accent} ${
+          coverageLensActive ? activeLensClasses : ''
+        } hover:border-slate-400 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600`}
       >
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
@@ -264,20 +333,42 @@ export function ScheduleHealthBar({
         </div>
 
         <div className="mt-2 flex items-center justify-between gap-1 text-xs font-medium text-slate-600">
-          <span className="leading-snug">
-            {covRatio === null ? 'No demand loaded' : 'Hourly demand met · ≥90% Good'}
+          <span
+            className={`leading-snug ${coverageLensActive ? 'font-semibold text-indigo-700' : ''}`}
+          >
+            {covRatio === null
+              ? 'Click to import CSV'
+              : coverageLensActive
+                ? 'Active lens · Click to clear'
+                : 'Click to inspect peak shortages'}
           </span>
-          <ChevronRight
-            className="h-3.5 w-3.5 shrink-0 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-indigo-600"
-            aria-hidden="true"
-          />
+          {coverageLensActive ? (
+            <X className="h-3.5 w-3.5 shrink-0 text-indigo-600" aria-hidden="true" />
+          ) : (
+            <ChevronRight
+              className="h-3.5 w-3.5 shrink-0 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-indigo-600"
+              aria-hidden="true"
+            />
+          )}
         </div>
       </button>
 
       {/* KPI 4: Hour Fairness */}
-      <div
-        title="Jain Fairness Index (0.00–1.00) measuring how evenly weekly hour caps are utilized across active team members."
-        className={`${cardBase} ${fairStyle.accent}`}
+      <button
+        type="button"
+        onClick={onInspectFairness}
+        disabled={fairnessDisabled}
+        aria-pressed={fairnessLensActive}
+        title={
+          fairnessDisabled
+            ? 'Assign hours to at least 2 team members to compare fairness.'
+            : fairnessLensActive
+              ? 'Rebalance lens active. Click to clear.'
+              : 'Jain Fairness Index (0.00–1.00) measuring how evenly weekly hour caps are utilized across active team members. Click to sort Team by % Used and spot rebalance pairs.'
+        }
+        className={`${cardBase} ${fairStyle.accent} ${
+          fairnessLensActive ? activeLensClasses : ''
+        } enabled:hover:border-slate-400 enabled:hover:shadow-sm disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600`}
       >
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
@@ -309,16 +400,30 @@ export function ScheduleHealthBar({
           )}
         </div>
 
-        <p className="mt-2 text-xs font-medium leading-snug text-slate-600">
-          {health.fairnessJainIndex === null
-            ? 'No hours assigned yet'
-            : health.isSingleEligibleStaff
-              ? '1 active staff — no comparison'
-              : minUtilPct !== null && maxUtilPct !== null
-                ? `Range ${minUtilPct}%–${maxUtilPct}% of weekly cap`
-                : 'Balanced across active team'}
-        </p>
-      </div>
+        <div className="mt-2 flex items-center justify-between gap-1 text-xs font-medium text-slate-600">
+          <span
+            className={`leading-snug ${fairnessLensActive ? 'font-semibold text-indigo-700' : ''}`}
+          >
+            {fairnessLensActive
+              ? 'Active lens · Click to clear'
+              : health.fairnessJainIndex === null
+                ? 'No hours assigned yet'
+                : health.isSingleEligibleStaff
+                  ? '1 active staff — no comparison'
+                  : minUtilPct !== null && maxUtilPct !== null
+                    ? `Range ${minUtilPct}%–${maxUtilPct}% of weekly cap`
+                    : 'Balanced across active team'}
+          </span>
+          {fairnessLensActive ? (
+            <X className="h-3.5 w-3.5 shrink-0 text-indigo-600" aria-hidden="true" />
+          ) : !fairnessDisabled ? (
+            <ChevronRight
+              className="h-3.5 w-3.5 shrink-0 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-indigo-600"
+              aria-hidden="true"
+            />
+          ) : null}
+        </div>
+      </button>
     </section>
   );
 }

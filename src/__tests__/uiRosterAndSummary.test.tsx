@@ -128,8 +128,17 @@ describe('Slice 4: Schedule Health Bar & P0 Aggregated Summary 7x16 (AC-05)', ()
     expect(within(healthSection).getByText(/Demand Coverage/i)).toBeTruthy();
     expect(within(healthSection).getByText(/Hour Fairness/i)).toBeTruthy();
 
-    // Clicking Staffing Gaps jumps to Hourly Summary tab
+    // Clicking Staffing Gaps activates Gap Focus lens on Weekly Roster (with Next stepper & Clear lens)
     await user.click(within(healthSection).getByRole('button', { name: /Staffing Gaps/i }));
+    expect(screen.getByText(/Gap focus:/i)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: /Next gap slot/i }));
+    await user.click(screen.getByRole('button', { name: /Clear lens/i }));
+    expect(screen.queryByText(/Gap focus:/i)).toBeNull();
+
+    // Clicking Demand Coverage activates Coverage Focus lens on Hourly Summary tab
+    await user.click(within(healthSection).getByRole('button', { name: /Demand Coverage/i }));
+    expect(screen.getByText(/Coverage focus:/i)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: /Next understaffed hour/i }));
 
     // Verify 4 mandatory weekly KPI cards
     expect(screen.getByText('Total Transactions')).toBeTruthy();
@@ -150,9 +159,28 @@ describe('Slice 4: Schedule Health Bar & P0 Aggregated Summary 7x16 (AC-05)', ()
     expect(screen.getByText(/Focused from Hourly Summary:/i)).toBeTruthy();
     expect(screen.getByText(/Mon 07:00/i)).toBeTruthy();
 
+    // Return trip: Back to Summary highlights Mon 07:00, then Back to Roster returns
+    await user.click(screen.getByRole('button', { name: /Back to Summary/i }));
+    expect(screen.getByText(/Returned from Weekly Roster:/i)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: /Back to Roster/i }));
+    expect(screen.getByText(/Focused from Hourly Summary:/i)).toBeTruthy();
+
+    // Roster Day header -> inspects that day in Hourly Summary -> Back to Roster
+    await user.click(screen.getByRole('button', { name: /Inspect Sat in Hourly Summary/i }));
+    expect(screen.getByText(/Focused from Weekly Roster:/i)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: /Back to Roster/i }));
+
     // Run Auto-schedule and verify 1-click Undo Auto-schedule restores empty draft
     await user.click(screen.getByRole('button', { name: /Auto-schedule/i }));
     expect(screen.getByRole('button', { name: /Undo Auto-schedule/i })).toBeTruthy();
+
+    // Clicking Hour Fairness activates Rebalance lens and sorts Team panel by % Used
+    await user.click(within(healthSection).getByRole('button', { name: /Hour Fairness/i }));
+    expect(screen.getByText(/Rebalance lens:/i)).toBeTruthy();
+    expect((screen.getByLabelText(/Sort staff/i) as HTMLSelectElement).value).toBe('utilization');
+    await user.click(screen.getByRole('button', { name: /Clear lens/i }));
+    expect(screen.queryByText(/Rebalance lens:/i)).toBeNull();
+    expect((screen.getByLabelText(/Sort staff/i) as HTMLSelectElement).value).toBe('name');
 
     // Test global Pin all / Unpin all + staff-scoped Pin all
     await user.click(screen.getByRole('button', { name: /^Pin all$/i }));

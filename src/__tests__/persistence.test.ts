@@ -41,6 +41,7 @@ import {
   previewDeleteShiftInSchedule,
   previewDeleteStaffInSchedule,
   previewEditShiftInSchedule,
+  reorderShiftTemplates,
   updateShiftTemplate,
   updateStaff,
 } from '../state/scheduleEntityActions';
@@ -237,6 +238,32 @@ describe('persistence & state (T-14, T-15, AC-01, AC-06)', () => {
     expect(delShiftRes.removedAssignmentsCount).toBe(1);
     state = delShiftRes.state;
     expect(state.schedules.find((s) => s.id === s2Id)!.assignments).toHaveLength(0);
+
+    // Reorder shift templates & validate error guards
+    const extraShiftRes = addShiftTemplate(state, s2Id, { startHour: 10, endHour: 14 }, deps);
+    expect(extraShiftRes.ok).toBe(true);
+    if (!extraShiftRes.ok) return;
+    state = extraShiftRes.state;
+    const currentShifts = state.schedules.find((s) => s.id === s2Id)!.shifts;
+    expect(currentShifts.length).toBe(2);
+    const reversedIds = [currentShifts[1]!.id, currentShifts[0]!.id];
+
+    const reorderRes = reorderShiftTemplates(state, s2Id, reversedIds, deps);
+    expect(reorderRes.ok).toBe(true);
+    if (!reorderRes.ok) return;
+    expect(reorderRes.changed).toBe(true);
+    state = reorderRes.state;
+    expect(state.schedules.find((s) => s.id === s2Id)!.shifts.map((sh) => sh.id)).toEqual(reversedIds);
+
+    // Unchanged order returns changed: false
+    const sameOrderRes = reorderShiftTemplates(state, s2Id, reversedIds, deps);
+    expect(sameOrderRes.ok).toBe(true);
+    if (sameOrderRes.ok) expect(sameOrderRes.changed).toBe(false);
+
+    // Invalid permutations rejected
+    expect(reorderShiftTemplates(state, s2Id, [reversedIds[0]!], deps).ok).toBe(false);
+    expect(reorderShiftTemplates(state, s2Id, [reversedIds[0]!, reversedIds[0]!], deps).ok).toBe(false);
+    expect(reorderShiftTemplates(state, s2Id, [reversedIds[0]!, 'unknown-id'], deps).ok).toBe(false);
   });
 
   it('T-15: enforces 4 storage modes, orphan stripping, save error handling, and Atomic Reset Contract (AC-06)', () => {

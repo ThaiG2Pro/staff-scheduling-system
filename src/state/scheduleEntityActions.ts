@@ -356,3 +356,56 @@ export function deleteShiftTemplate(
     removedAssignmentsCount,
   };
 }
+
+/**
+ * Reorders the ShiftTemplate list in a schedule so both Manage Shifts and Weekly Roster rows
+ * follow the manager's custom order.
+ *
+ * @param state - Current persisted state.
+ * @param scheduleId - Owning schedule ID.
+ * @param orderedShiftIds - Complete permutation of existing `schedule.shifts` IDs.
+ * @param deps - Optional clock dependency.
+ * @returns Updated state or validation error.
+ */
+export function reorderShiftTemplates(
+  state: Readonly<PersistedAppState>,
+  scheduleId: string,
+  orderedShiftIds: readonly string[],
+  deps: ActionDeps = DEFAULT_ACTION_DEPS,
+): StateActionResult {
+  const schedule = findSchedule(state, scheduleId);
+  if (!schedule) return { ok: false, error: 'Schedule not found.' };
+
+  if (orderedShiftIds.length !== schedule.shifts.length) {
+    return { ok: false, error: 'Shift order must include every shift template.' };
+  }
+
+  const shiftById = new Map(schedule.shifts.map((sh) => [sh.id, sh]));
+  const seen = new Set<string>();
+  const reordered: ShiftTemplate[] = [];
+
+  for (const id of orderedShiftIds) {
+    if (seen.has(id)) {
+      return { ok: false, error: 'Shift order contains duplicate shift IDs.' };
+    }
+    const found = shiftById.get(id);
+    if (!found) {
+      return { ok: false, error: 'Shift template not found in schedule.' };
+    }
+    seen.add(id);
+    reordered.push(found);
+  }
+
+  const unchanged = reordered.every((sh, idx) => sh.id === schedule.shifts[idx]!.id);
+  if (unchanged) {
+    return { ok: true, state, changed: false };
+  }
+
+  const updatedSchedule: Schedule = {
+    ...schedule,
+    updatedAt: deps.nowIso(),
+    shifts: reordered,
+  };
+
+  return { ok: true, state: replaceSchedule(state, updatedSchedule), changed: true };
+}
