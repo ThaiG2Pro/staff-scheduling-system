@@ -346,7 +346,7 @@ export function WeeklyRosterGrid({
                         </span>
                       ) : status.hasDemand &&
                         (status.maxPeakNeed >= 2 || status.shortageHours >= 6) ? (
-                        <span className="whitespace-nowrap rounded-full border border-orange-300 bg-orange-50 px-1.5 py-0.2 text-[10px] font-semibold text-orange-900">
+                        <span className="whitespace-nowrap rounded-full border border-indigo-400 bg-white px-1.5 py-0.2 text-[10px] font-semibold text-indigo-800">
                           Need {status.shortageHours}h
                         </span>
                       ) : status.hasDemand && status.shortageHours > 0 ? (
@@ -428,7 +428,7 @@ export function WeeklyRosterGrid({
                       addButtonLabel = 'Gap';
                     } else if (need.maxNeed >= 2) {
                       addButtonClasses =
-                        'border-orange-300 bg-orange-50 text-orange-900 font-semibold hover:bg-orange-100';
+                        'border-indigo-400 bg-white text-indigo-800 font-semibold hover:bg-indigo-50';
                       addButtonLabel = 'Need 2+';
                     } else if (need.maxNeed === 1) {
                       addButtonClasses =
