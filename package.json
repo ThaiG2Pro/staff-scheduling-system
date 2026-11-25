@@ -12,7 +12,10 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "bench": "vitest bench --run",
-    "bench:browser": "playwright test --config=playwright.config.ts"
+    "bench:browser": "playwright test --config=playwright.config.ts",
+    "dev:sim": "vite --config tools/simulator/vite.simulator.config.ts",
+    "build:sim": "tsc -p tools/simulator/tsconfig.simulator.json --noEmit && vite build --config tools/simulator/vite.simulator.config.ts",
+    "typecheck:sim": "tsc -p tools/simulator/tsconfig.simulator.json --noEmit"
   },
   "dependencies": {
     "lucide-react": "^1.78.0",
