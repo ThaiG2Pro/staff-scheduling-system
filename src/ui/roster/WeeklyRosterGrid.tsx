@@ -340,17 +340,20 @@ export function WeeklyRosterGrid({
                     <div className="flex flex-wrap items-center justify-between gap-1">
                       <span className="text-xs font-bold text-slate-900">{DAY_LABELS[day]}</span>
                       {status.hasDemand && status.gapCount > 0 ? (
-                        <span className="inline-flex items-center gap-0.5 whitespace-nowrap rounded-full border border-rose-300 bg-rose-50 px-1.5 py-0.2 text-[10px] font-semibold text-rose-800">
+                        <span className="inline-flex items-center gap-0.5 whitespace-nowrap rounded-full bg-rose-600 px-1.5 py-0.2 text-[10px] font-semibold text-white">
                           <AlertTriangle className="h-2.5 w-2.5" aria-hidden="true" />
                           {status.gapCount} gap{status.gapCount === 1 ? '' : 's'}
                         </span>
-                      ) : status.hasDemand &&
-                        (status.maxPeakNeed >= 2 || status.shortageHours >= 6) ? (
-                        <span className="whitespace-nowrap rounded-full border border-indigo-400 bg-white px-1.5 py-0.2 text-[10px] font-semibold text-indigo-800">
+                      ) : status.hasDemand && status.shortageHours >= 15 ? (
+                        <span className="whitespace-nowrap rounded-full bg-orange-600 px-1.5 py-0.2 text-[10px] font-semibold text-white">
+                          Need {status.shortageHours}h
+                        </span>
+                      ) : status.hasDemand && status.shortageHours >= 6 ? (
+                        <span className="whitespace-nowrap rounded-full bg-amber-500 px-1.5 py-0.2 text-[10px] font-semibold text-white">
                           Need {status.shortageHours}h
                         </span>
                       ) : status.hasDemand && status.shortageHours > 0 ? (
-                        <span className="whitespace-nowrap rounded-full border border-slate-300 bg-white px-1.5 py-0.2 text-[10px] font-medium text-slate-700">
+                        <span className="whitespace-nowrap rounded-full border border-amber-300 bg-amber-100 px-1.5 py-0.2 text-[10px] font-semibold text-amber-900">
                           Need {status.shortageHours}h
                         </span>
                       ) : status.hasDemand ? (
@@ -424,15 +427,19 @@ export function WeeklyRosterGrid({
 
                     if (need.hasGap) {
                       addButtonClasses =
-                        'border-rose-300 bg-rose-50 text-rose-800 font-semibold hover:bg-rose-100';
+                        'border-rose-400 bg-rose-100/90 text-rose-900 font-semibold hover:bg-rose-200/80';
                       addButtonLabel = 'Gap';
-                    } else if (need.maxNeed >= 2) {
+                    } else if (need.maxNeed >= 3) {
                       addButtonClasses =
-                        'border-indigo-400 bg-white text-indigo-800 font-semibold hover:bg-indigo-50';
-                      addButtonLabel = 'Need 2+';
+                        'border-orange-500 bg-orange-100/80 text-orange-950 font-semibold hover:bg-orange-200/80';
+                      addButtonLabel = `Need ${need.maxNeed}+`;
+                    } else if (need.maxNeed === 2) {
+                      addButtonClasses =
+                        'border-amber-400 bg-amber-100/70 text-amber-950 font-semibold hover:bg-amber-200/70';
+                      addButtonLabel = 'Need 2';
                     } else if (need.maxNeed === 1) {
                       addButtonClasses =
-                        'border-slate-300 bg-white text-slate-700 font-medium hover:border-indigo-400 hover:text-indigo-700';
+                        'border-amber-300 bg-amber-50/70 text-amber-900 font-medium hover:bg-amber-100/70';
                       addButtonLabel = 'Need 1';
                     }
 

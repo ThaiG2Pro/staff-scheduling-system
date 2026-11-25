@@ -48,8 +48,8 @@ export function AssignmentChip({
   const isOvertime = Boolean(warningFlags?.isOverMaxHours);
 
   const isCritical = isPinConflict || isOverlapping;
-  const isWarning = !isCritical && (isMultiShiftDay || isOvertime);
-  const hasAnyIssue = isCritical || isWarning;
+  const isDayConflict = !isCritical && isMultiShiftDay;
+  const hasRow2Issue = isCritical || isDayConflict;
 
   const localWarningLabel = [
     isOverlapping ? 'Overlapping shifts' : null,
@@ -66,9 +66,14 @@ export function AssignmentChip({
       ? 'bg-rose-50 border-rose-400 border-l-rose-600 text-rose-950 ring-2 ring-rose-500/70'
       : 'bg-rose-50 border-rose-300 border-l-rose-600 text-rose-950';
     overlayBg = 'bg-rose-50/95';
-  } else if (isWarning) {
+  } else if (isDayConflict) {
     surfaceClasses = 'bg-amber-50 border-amber-300 border-l-amber-500 text-amber-950';
     overlayBg = 'bg-amber-50/95';
+  } else if (isOvertime) {
+    // Keep healthy emerald surface to avoid flooding the entire week in amber;
+    // highlight overtime quietly via amber left accent + compact inline OT tag.
+    surfaceClasses = 'bg-emerald-50/80 border-emerald-300/80 border-l-amber-500 text-emerald-950';
+    overlayBg = 'bg-emerald-50/95';
   }
 
   return (
@@ -77,7 +82,7 @@ export function AssignmentChip({
         isHighlighted ? 'ring-2 ring-indigo-600 ring-offset-1' : ''
       } ${isDimmed ? 'opacity-40' : 'opacity-100'}`}
     >
-      {/* Row 1: Staff Name + New/Pin badge */}
+      {/* Row 1: Staff Name + compact inline OT / New / Pin indicators */}
       <div className="flex min-w-0 items-center gap-1">
         <button
           type="button"
@@ -88,6 +93,15 @@ export function AssignmentChip({
         >
           {staffName}
         </button>
+
+        {isOvertime && !hasRow2Issue && (
+          <span
+            title="Staff exceeds weekly hour limit"
+            className="shrink-0 rounded border border-amber-400 bg-amber-100 px-1 py-0.2 text-[9px] font-bold text-amber-900 group-hover:opacity-0"
+          >
+            OT
+          </span>
+        )}
 
         {isNewFromAuto && !assignment.isPinned && (
           <span className="shrink-0 rounded bg-sky-200/80 px-1 py-0.2 text-[9px] font-bold text-sky-900">
@@ -103,8 +117,8 @@ export function AssignmentChip({
         )}
       </div>
 
-      {/* Row 2: Self-explanatory issue pills (only when shift has a problem) */}
-      {hasAnyIssue && (
+      {/* Row 2: Self-explanatory conflict pills (only for same-day conflicts / pin conflicts) */}
+      {hasRow2Issue && (
         <div className="mt-1 flex flex-wrap items-center gap-1">
           {isPinConflict && (
             <span className="inline-flex items-center gap-0.5 rounded bg-rose-200/80 px-1.5 py-0.2 text-[10px] font-bold text-rose-900">
@@ -138,7 +152,7 @@ export function AssignmentChip({
               title="Over weekly hour limit"
               className="inline-flex items-center rounded border border-amber-300 bg-amber-100 px-1.5 py-0.2 text-[10px] font-bold text-amber-900"
             >
-              {hasLocalWarning || isPinConflict ? 'OT' : 'OT · Over cap'}
+              OT
             </span>
           )}
         </div>

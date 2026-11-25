@@ -20,6 +20,27 @@ function formatRate(value: number | null): string {
   return value.toFixed(1);
 }
 
+/** Returns progressive heatmap background/text classes for High Load cells (`txns/hr > targetN`). */
+function getHighLoadHeatClasses(rate: number, targetN: number): { cellBg: string; textTone: string } {
+  const ratio = targetN > 0 ? rate / targetN : 1;
+  if (ratio > 1.6) {
+    return {
+      cellBg: 'bg-orange-200/80 hover:bg-orange-200',
+      textTone: 'text-orange-950',
+    };
+  }
+  if (ratio > 1.25) {
+    return {
+      cellBg: 'bg-amber-100 hover:bg-amber-200/70',
+      textTone: 'text-amber-950',
+    };
+  }
+  return {
+    cellBg: 'bg-amber-50 hover:bg-amber-100/80',
+    textTone: 'text-amber-900',
+  };
+}
+
 /**
  * Displays the 4 weekly summary KPIs and 7×16 P0 hourly breakdown table.
  * Clicking any `Gap` or `High Load` (`txns/hr > targetN`) cell navigates directly to the
@@ -158,9 +179,14 @@ export function AggregatedSummaryView({
                     cell.txnsPerStaffHour > targetN;
                   const isActionable = isGap || isHighLoad;
 
+                  const highLoadHeat =
+                    isHighLoad && cell.txnsPerStaffHour !== null
+                      ? getHighLoadHeatClasses(cell.txnsPerStaffHour, targetN)
+                      : null;
+
                   let cellBg = day >= 5 ? 'bg-slate-50/70' : 'bg-white';
-                  if (isGap) cellBg = 'bg-rose-50 hover:bg-rose-100/80';
-                  else if (isHighLoad) cellBg = 'bg-amber-50 hover:bg-amber-100/80';
+                  if (isGap) cellBg = 'bg-rose-100 hover:bg-rose-200/70';
+                  else if (highLoadHeat) cellBg = highLoadHeat.cellBg;
                   else if (isZeroZero) cellBg = 'bg-slate-100/70';
 
                   const content = (
@@ -170,11 +196,13 @@ export function AggregatedSummaryView({
                       </p>
                       <p className="text-[11px] text-slate-600">{cell.staffHours} staff</p>
                       {isGap ? (
-                        <p className="inline-flex items-center justify-center gap-0.5 text-[11px] font-bold text-rose-800">
+                        <p className="inline-flex items-center justify-center gap-0.5 text-[11px] font-bold text-rose-900">
                           <AlertTriangle className="h-3 w-3" aria-hidden="true" />– (Gap)
                         </p>
-                      ) : isHighLoad ? (
-                        <p className="inline-flex items-center justify-center gap-0.5 text-[11px] font-bold text-amber-900">
+                      ) : highLoadHeat ? (
+                        <p
+                          className={`inline-flex items-center justify-center gap-0.5 text-[11px] font-bold ${highLoadHeat.textTone}`}
+                        >
                           <ArrowUpRight className="h-3 w-3" aria-hidden="true" />
                           {cell.txnsPerStaffHour!.toFixed(1)}/h
                         </p>

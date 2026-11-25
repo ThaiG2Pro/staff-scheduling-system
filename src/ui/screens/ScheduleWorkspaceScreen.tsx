@@ -260,6 +260,7 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
         {viewModel && (
           <ScheduleHealthBar
             health={viewModel.health}
+            staffMetrics={viewModel.staffMetrics}
             onInspectGapsOrCoverage={() => setActiveTab('summary')}
             onInspectHourLimitWarnings={() => {
               setHighlightedStaffId(null);

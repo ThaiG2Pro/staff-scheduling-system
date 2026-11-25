@@ -16,10 +16,11 @@ import {
   TrendingUp,
   UserX,
 } from 'lucide-react';
-import type { HealthStatus, ScheduleHealth } from '../../domain/types';
+import type { HealthStatus, ScheduleHealth, StaffMetrics } from '../../domain/types';
 
 export interface ScheduleHealthBarProps {
   health: ScheduleHealth;
+  staffMetrics?: Record<string, StaffMetrics>;
   onInspectGapsOrCoverage: () => void;
   onInspectHourLimitWarnings: () => void;
 }
@@ -98,6 +99,7 @@ function StatusPill({ status }: { status: HealthStatus }) {
  */
 export function ScheduleHealthBar({
   health,
+  staffMetrics,
   onInspectGapsOrCoverage,
   onInspectHourLimitWarnings,
 }: ScheduleHealthBarProps) {
@@ -114,6 +116,16 @@ export function ScheduleHealthBar({
     health.fairnessJainIndex !== null
       ? Math.min(100, Math.round(health.fairnessJainIndex * 100))
       : null;
+
+  const utilValues = staffMetrics
+    ? Object.values(staffMetrics)
+        .map((m) => m.utilization)
+        .filter((u): u is number => u !== null)
+    : [];
+  const minUtilPct =
+    utilValues.length > 0 ? Math.round(Math.min(...utilValues) * 100) : null;
+  const maxUtilPct =
+    utilValues.length > 0 ? Math.round(Math.max(...utilValues) * 100) : null;
 
   const cardBase =
     'group relative flex min-w-0 flex-col justify-between rounded-xl border border-slate-300/80 border-l-4 bg-white px-4 py-3.5 text-left shadow-xs transition';
@@ -302,7 +314,9 @@ export function ScheduleHealthBar({
             ? 'No hours assigned yet'
             : health.isSingleEligibleStaff
               ? '1 active staff — no comparison'
-              : `Team balance · Jain ${health.fairnessJainIndex.toFixed(2)}`}
+              : minUtilPct !== null && maxUtilPct !== null
+                ? `Range ${minUtilPct}%–${maxUtilPct}% of weekly cap`
+                : 'Balanced across active team'}
         </p>
       </div>
     </section>
