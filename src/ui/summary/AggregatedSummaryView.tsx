@@ -23,9 +23,12 @@ export type FocusedSummaryTarget =
   | { kind: 'day'; day: DayOfWeek }
   | { kind: 'cell'; day: DayOfWeek; hour: OperatingHour };
 
+export type SummaryViewMode = 'metrics' | 'coverage';
+
 export interface AggregatedSummaryViewProps {
   summary: AggregatedSummary;
   targetN: number;
+  viewMode?: SummaryViewMode;
   highlightUnderstaffedOnly?: boolean;
   onClearCoverageLens?: () => void;
   focusedTarget?: FocusedSummaryTarget | null;
@@ -61,6 +64,26 @@ function getHighLoadHeatClasses(rate: number, targetN: number): { cellBg: string
   };
 }
 
+/** Returns 3-tier progressive rose heatmap classes for Coverage View Shortage (`delta < 0` or Gap). */
+function getShortageHeatClasses(delta: number, isGap: boolean): { cellBg: string; textTone: string } {
+  if (isGap || delta <= -3) {
+    return {
+      cellBg: 'bg-rose-200/80 hover:bg-rose-200',
+      textTone: 'text-rose-950',
+    };
+  }
+  if (delta === -2) {
+    return {
+      cellBg: 'bg-rose-100 hover:bg-rose-200/70',
+      textTone: 'text-rose-900',
+    };
+  }
+  return {
+    cellBg: 'bg-rose-50 hover:bg-rose-100',
+    textTone: 'text-rose-800',
+  };
+}
+
 /**
  * Displays the 4 weekly summary KPIs and 7×16 P0 hourly breakdown table.
  * Clicking any `Gap` or `High Load` (`txns/hr > targetN`) cell navigates directly to the
@@ -72,6 +95,7 @@ function getHighLoadHeatClasses(rate: number, targetN: number): { cellBg: string
 export function AggregatedSummaryView({
   summary,
   targetN,
+  viewMode = 'metrics',
   highlightUnderstaffedOnly = false,
   onClearCoverageLens,
   focusedTarget = null,
@@ -80,7 +104,6 @@ export function AggregatedSummaryView({
   onJumpToRosterCell,
   onJumpToRosterDay,
 }: AggregatedSummaryViewProps) {
-  const [viewMode, setViewMode] = useState<'metrics' | 'coverage'>('metrics');
   const [activePeakIndex, setActivePeakIndex] = useState(0);
   const cellRefs = useRef<Record<string, HTMLTableCellElement | null>>({});
 
@@ -363,40 +386,9 @@ export function AggregatedSummaryView({
         </div>
       </div>
 
-      {/* Legend & P1 Coverage View Toggle */}
+      {/* Legend */}
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-700">
         <div className="flex flex-wrap items-center gap-3">
-          <div
-            role="group"
-            aria-label="Summary view mode"
-            className="inline-flex rounded-lg border border-slate-300 bg-slate-100 p-0.5"
-          >
-            <button
-              type="button"
-              onClick={() => setViewMode('metrics')}
-              aria-pressed={viewMode === 'metrics'}
-              className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
-                viewMode === 'metrics'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Metrics View
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('coverage')}
-              aria-pressed={viewMode === 'coverage'}
-              className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
-                viewMode === 'coverage'
-                  ? 'bg-white text-indigo-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Coverage View
-            </button>
-          </div>
-
           {viewMode === 'metrics' ? (
             <>
               <span className="font-semibold text-slate-800">Cell lines:</span>
@@ -428,9 +420,9 @@ export function AggregatedSummaryView({
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-2.5 text-[11px]">
-            <span className="inline-flex items-center gap-1 rounded border border-rose-300 bg-rose-50 px-2 py-0.5 font-medium text-rose-800">
+            <span className="inline-flex items-center gap-1 rounded border border-rose-300 bg-rose-100 px-2 py-0.5 font-medium text-rose-900">
               <AlertTriangle className="h-3 w-3" aria-hidden="true" />
-              Shortage (&lt;0)
+              Shortage (&lt;0: -1 / -2 / -3+·Gap)
             </span>
             <span className="inline-flex items-center gap-1 rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 font-medium text-emerald-900">
               <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
@@ -518,10 +510,14 @@ export function AggregatedSummaryView({
                   const isSurplus = delta !== null && delta > 0;
                   const isExactCovered =
                     delta === 0 && cell.requiredStaff !== null && cell.requiredStaff > 0;
+                  const shortageHeat =
+                    viewMode === 'coverage' && (isGap || isShortage)
+                      ? getShortageHeatClasses(delta ?? -1, isGap)
+                      : null;
 
                   let cellBg = day >= 5 ? 'bg-slate-50/70' : 'bg-white';
                   if (viewMode === 'coverage') {
-                    if (isGap || isShortage) cellBg = 'bg-rose-100 hover:bg-rose-200/70';
+                    if (shortageHeat) cellBg = shortageHeat.cellBg;
                     else if (isExactCovered) cellBg = 'bg-emerald-50/80';
                     else if (isSurplus) cellBg = 'bg-sky-50/80';
                     else if (isZeroZero) cellBg = 'bg-slate-100/70';
@@ -542,7 +538,11 @@ export function AggregatedSummaryView({
                         {delta === null ? (
                           <p className="text-[11px] font-medium text-slate-500">–</p>
                         ) : isShortage ? (
-                          <p className="inline-flex items-center justify-center gap-0.5 text-[11px] font-bold text-rose-900 tabular-nums">
+                          <p
+                            className={`inline-flex items-center justify-center gap-0.5 text-[11px] font-bold tabular-nums ${
+                              shortageHeat?.textTone ?? 'text-rose-900'
+                            }`}
+                          >
                             <AlertTriangle className="h-3 w-3" aria-hidden="true" />
                             {delta}
                           </p>

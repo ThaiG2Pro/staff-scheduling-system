@@ -204,7 +204,7 @@ describe('Slice 4: Schedule Health Bar & P0 Aggregated Summary 7x16 (AC-05)', ()
     await user.click(coverageBtn);
     expect(coverageBtn.getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByText(/1\. Scheduled \/ Required staff/i)).toBeTruthy();
-    expect(screen.getByText(/Shortage \(<0\)/i)).toBeTruthy();
+    expect(screen.getByText(/Shortage \(<0/i)).toBeTruthy();
     expect(screen.getByText(/Exact \(0\)/i)).toBeTruthy();
 
     await user.click(metricsBtn);

@@ -37,6 +37,7 @@ import { WeeklyRosterGrid, type FocusedRosterSlot } from '../roster/WeeklyRoster
 import {
   AggregatedSummaryView,
   type FocusedSummaryTarget,
+  type SummaryViewMode,
 } from '../summary/AggregatedSummaryView';
 import { ContextualBanners, type WorkspaceBannerState } from '../workspace/ContextualBanners';
 import { RecoveryBanner } from '../workspace/RecoveryBanner';
@@ -74,6 +75,7 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
   const [focusedSlot, setFocusedSlot] = useState<FocusedRosterSlot | null>(null);
   const [focusedSummaryTarget, setFocusedSummaryTarget] =
     useState<FocusedSummaryTarget | null>(null);
+  const [summaryViewMode, setSummaryViewMode] = useState<SummaryViewMode>('metrics');
 
   const [banner, setBanner] = useState<WorkspaceBannerState | null>(null);
   const [conflictAssignmentIds, setConflictAssignmentIds] = useState<ReadonlySet<string>>(
@@ -641,12 +643,44 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
                   </button>
                 </div>
               ) : (
-                <div className="text-xs text-slate-600">
-                  {schedule.demand
-                    ? `Demand: ${schedule.demand.sourceFileName ?? 'Imported CSV'} (${formatTimestamp(
-                        schedule.demand.importedAt,
-                      )})`
-                    : 'No demand CSV imported yet'}
+                <div className="flex flex-wrap items-center justify-end gap-3">
+                  <span className="hidden text-xs text-slate-600 md:inline">
+                    {schedule.demand
+                      ? `Demand: ${schedule.demand.sourceFileName ?? 'Imported CSV'} (${formatTimestamp(
+                          schedule.demand.importedAt,
+                        )})`
+                      : 'No demand CSV imported yet'}
+                  </span>
+                  <div
+                    role="group"
+                    aria-label="Summary view mode"
+                    className="inline-flex rounded-lg border border-slate-300 bg-slate-200/70 p-0.5"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setSummaryViewMode('metrics')}
+                      aria-pressed={summaryViewMode === 'metrics'}
+                      className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+                        summaryViewMode === 'metrics'
+                          ? 'bg-white text-slate-900 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Metrics View
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSummaryViewMode('coverage')}
+                      aria-pressed={summaryViewMode === 'coverage'}
+                      className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+                        summaryViewMode === 'coverage'
+                          ? 'bg-white text-indigo-900 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Coverage View
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -841,6 +875,7 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
               <AggregatedSummaryView
                 summary={viewModel.summary}
                 targetN={schedule.targetTxnsPerStaffHour}
+                viewMode={summaryViewMode}
                 highlightUnderstaffedOnly={activeKpiLens === 'coverage'}
                 onClearCoverageLens={() => setActiveKpiLens(null)}
                 focusedTarget={focusedSummaryTarget}
