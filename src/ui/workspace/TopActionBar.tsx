@@ -40,7 +40,7 @@ export interface TopActionBarProps {
 const MISSING_INPUT_LABELS: Record<MissingInputCode, string> = {
   DEMAND: 'Import transaction CSV demand',
   SHIFTS: 'Add at least 1 shift template',
-  ELIGIBLE_STAFF: 'Add at least 1 staff member with > 0 max hours',
+  ELIGIBLE_STAFF: 'Add at least 1 eligible staff member (> 0 max hours and at least 1 available day)',
   INVALID_N: 'Set a valid Target N (1–500)',
 };
 

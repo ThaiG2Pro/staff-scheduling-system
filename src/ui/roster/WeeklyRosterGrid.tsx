@@ -20,6 +20,7 @@ import {
   X,
 } from 'lucide-react';
 import { DAYS_OF_WEEK, DAY_LABELS, OPERATING_HOURS } from '../../domain/constants';
+import { getShiftActiveDays, isShiftActiveOnDay } from '../../domain/hardRules';
 import type {
   AggregatedSummary,
   Assignment,
@@ -30,6 +31,7 @@ import type {
   Staff,
 } from '../../domain/types';
 import { formatHour24, formatShiftRange } from '../common/formatters';
+import { formatWeekdaySummary } from '../common/WeekdayToggleGroup';
 import { AssignmentChip } from './AssignmentChip';
 import {
   AssignmentGuidancePopover,
@@ -268,6 +270,7 @@ export function WeeklyRosterGrid({
     const list: Array<{ key: string; day: DayOfWeek; shift: ShiftTemplate }> = [];
     for (const day of DAYS_OF_WEEK) {
       for (const shift of orderedShifts) {
+        if (!isShiftActiveOnDay(shift, day)) continue;
         const need = computeSlotNeed(day, shift, summary);
         if (need.hasGap) {
           list.push({ key: `${shift.id}|${day}`, day, shift });
@@ -621,12 +624,45 @@ export function WeeklyRosterGrid({
                           </button>
                         </div>
                       </div>
+                      {shift.daysOfWeek && (
+                        <span className="inline-block rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
+                          {formatWeekdaySummary(getShiftActiveDays(shift), 'active')}
+                        </span>
+                      )}
                     </div>
                   </th>
 
                   {/* 7 Day Cells */}
                   {DAYS_OF_WEEK.map((day) => {
                     const cellKey = `${shift.id}|${day}`;
+                    const isActiveDay = isShiftActiveOnDay(shift, day);
+                    if (!isActiveDay) {
+                      return (
+                        <td
+                          key={day}
+                          ref={(el) => {
+                            cellRefs.current[cellKey] = el;
+                          }}
+                          data-inactive-cell="true"
+                          aria-disabled="true"
+                          style={{
+                            backgroundImage:
+                              'repeating-linear-gradient(-45deg, #f1f5f9, #f1f5f9 6px, #e2e8f0 6px, #e2e8f0 12px)',
+                          }}
+                          className="border-r border-slate-200 p-1.5 last:border-r-0 align-middle"
+                        >
+                          <div
+                            className="flex items-center justify-center"
+                            style={{ minHeight: `${rowHeightPx}px` }}
+                          >
+                            <span className="rounded bg-white/80 px-2 py-0.5 text-[10px] font-medium text-slate-500">
+                              Inactive
+                            </span>
+                          </div>
+                        </td>
+                      );
+                    }
+
                     const cellAssignments = assignmentsByCell.get(cellKey) ?? [];
                     const need = computeSlotNeed(day, shift, summary);
                     const isWeekend = day >= 5;

@@ -8,6 +8,7 @@ import { useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Pencil, Plus, Search, Trash2, Users } from 'lucide-react';
 import { DAY_LABELS } from '../../domain/constants';
 import type { Staff, StaffMetrics } from '../../domain/types';
+import { formatWeekdaySummary } from '../common/WeekdayToggleGroup';
 
 export type StaffFilterMode = 'all' | 'under_cap' | 'over_limit';
 export type StaffSortMode = 'name' | 'hrs_left' | 'utilization';
@@ -374,6 +375,12 @@ export function StaffPanel({
                     {assigned}/{max}h
                   </span>
                 </div>
+
+                {member.unavailableDays && member.unavailableDays.length > 0 && (
+                  <p className="mt-1 pl-9 text-[11px] font-medium text-rose-700">
+                    {formatWeekdaySummary(member.unavailableDays, 'off')}
+                  </p>
+                )}
               </div>
             );
           })
