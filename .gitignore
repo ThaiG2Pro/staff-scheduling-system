@@ -70,3 +70,4 @@ data/local/
 memory/*/_index.md
 /context/
 # <<< kiro-sdlc-kit <<<
+.vercel
