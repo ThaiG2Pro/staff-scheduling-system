@@ -300,3 +300,91 @@ describe('Slice 3: Prepare Flows, Target N Round-trip & CSV Import (AC-01, AC-02
     expect(screen.queryByText('Maya Lin')).toBeNull();
   });
 });
+
+describe('Phase 2: Shift Active Days & Staff Unavailability UI (AC-P2-003, AC-P2-005, AC-P2-008)', () => {
+  it('supports ManageShiftsModal 7-day toggles, min-1 active day guard, and confirmed cascade delete on disabling days (AC-P2-003, AC-P2-005)', async () => {
+    const user = userEvent.setup();
+    const mem = createMemoryStorage();
+
+    render(
+      <App
+        bootstrapState={makeNormalBootstrap()}
+        storeOptions={{ deps: createTestDeps(), getStorage: () => mem.storage }}
+      />,
+    );
+
+    await user.click(screen.getAllByRole('button', { name: /Load Demo Store/i })[0]!);
+
+    // Assign Alice Nguyen on Sat 07:00 – 15:00 and pin it
+    await user.click(screen.getByRole('button', { name: /Add staff to Sat 07:00 – 15:00/i }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Alice Nguyen/i }));
+    await user.click(screen.getByRole('button', { name: /^Pin Alice Nguyen$/i }));
+
+    // Open Manage Shifts modal
+    await user.click(screen.getByRole('button', { name: /^Shifts$/i }));
+    const shiftsDialog = screen.getByRole('dialog');
+
+    // New shift defaults to all 7 days pressed; unchecking the last day is blocked
+    const newDaysGroup = within(shiftsDialog).getByRole('group', {
+      name: /Active days for new shift/i,
+    });
+    for (const label of ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']) {
+      expect(within(newDaysGroup).getByRole('button', { name: label }).getAttribute('aria-pressed')).toBe('true');
+    }
+    for (const label of ['Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']) {
+      await user.click(within(newDaysGroup).getByRole('button', { name: label }));
+    }
+    // Attempt to uncheck last remaining day (Mon)
+    await user.click(within(newDaysGroup).getByRole('button', { name: 'Mon' }));
+    expect(within(newDaysGroup).getByRole('button', { name: 'Mon' }).getAttribute('aria-pressed')).toBe('true');
+    expect(within(shiftsDialog).getByRole('alert').textContent).toMatch(/at least 1 day/i);
+
+    // Edit 07:00 – 15:00, disable Sat, click Save -> ConfirmDialog previews 1 affected assignment
+    await user.click(within(shiftsDialog).getByRole('button', { name: /Edit shift 07:00 – 15:00/i }));
+    const editDaysGroup = within(shiftsDialog).getByRole('group', {
+      name: /Active days for shift 07:00 – 15:00/i,
+    });
+    await user.click(within(editDaysGroup).getByRole('button', { name: 'Sat' }));
+    await user.click(within(shiftsDialog).getByRole('button', { name: /^Save$/i }));
+
+    // Cancel preserves state
+    const dialogs = screen.getAllByRole('dialog');
+    const confirmDialog = dialogs[dialogs.length - 1]!;
+    expect(within(confirmDialog).getByText(/1 existing assignment/i)).toBeTruthy();
+    await user.click(within(confirmDialog).getByRole('button', { name: /^Cancel$/i }));
+
+    // Save again & confirm -> atomic cascade delete removes Sat assignment
+    await user.click(within(shiftsDialog).getByRole('button', { name: /^Save$/i }));
+    const confirmDialog2 = screen.getAllByRole('dialog').at(-1)!;
+    await user.click(within(confirmDialog2).getByRole('button', { name: /Remove & Save/i }));
+    await user.click(within(shiftsDialog).getByRole('button', { name: /^Done$/i }));
+
+    // Sat assignment is gone and Sat cell is now disabled
+    expect(screen.queryByRole('button', { name: /^Unpin Alice Nguyen$/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Add staff to Sat 07:00 – 15:00/i })).toBeNull();
+  });
+
+  it('supports StaffFormModal 7-day unavailability toggles and StaffPanel concise day-off summary (AC-P2-008)', async () => {
+    const user = userEvent.setup();
+    const mem = createMemoryStorage();
+
+    render(
+      <App
+        bootstrapState={makeNormalBootstrap()}
+        storeOptions={{ deps: createTestDeps(), getStorage: () => mem.storage }}
+      />,
+    );
+
+    await user.click(screen.getAllByRole('button', { name: /Load Demo Store/i })[0]!);
+    await user.click(screen.getByRole('button', { name: /Edit Alice Nguyen/i }));
+
+    const staffDialog = screen.getByRole('dialog');
+    const unavailGroup = within(staffDialog).getByRole('group', { name: /Unavailable days/i });
+    await user.click(within(unavailGroup).getByRole('button', { name: 'Wed' }));
+    await user.click(within(unavailGroup).getByRole('button', { name: 'Sun' }));
+    await user.click(within(staffDialog).getByRole('button', { name: /Save Changes/i }));
+
+    const teamPanel = screen.getByRole('complementary', { name: /Team panel/i });
+    expect(within(teamPanel).getByText('Off: Wed, Sun')).toBeTruthy();
+  });
+});

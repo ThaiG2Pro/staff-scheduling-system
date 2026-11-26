@@ -251,8 +251,10 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
   }, [undoStack.length, performUndo, activeKpiLens, focusedSummaryTarget]);
 
   const handleRunAutoSchedule = () => {
+    const assignmentSlotKey = (a: { day: number; shiftId: string; staffId: string }) =>
+      `${a.day}:${a.shiftId}:${a.staffId}`;
     const beforeSnapshot = schedule.assignments.map((a) => ({ ...a }));
-    const beforeIds = new Set(schedule.assignments.map((a) => a.id));
+    const beforeKeys = new Set(schedule.assignments.map(assignmentSlotKey));
     const beforeCov =
       viewModel?.health.demandCoverage?.ratio !== null &&
       viewModel?.health.demandCoverage?.ratio !== undefined
@@ -265,7 +267,9 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
 
     if (result.status === 'SUCCESS') {
       const addedIds = new Set(
-        result.assignments.filter((a) => !beforeIds.has(a.id)).map((a) => a.id),
+        result.assignments
+          .filter((a) => !beforeKeys.has(assignmentSlotKey(a)))
+          .map((a) => a.id),
       );
       const afterCov =
         result.diagnostics.demandCoverage !== null
@@ -693,11 +697,11 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
                   Healthy
                 </span>
                 <span
-                  title="Staff assigned 2+ shifts on the same day or exceeding weekly hour limit"
+                  title="Staff assigned 2+ shifts on the same day, on a day off, or exceeding weekly hour limit"
                   className="inline-flex cursor-help items-center gap-1.5 whitespace-nowrap"
                 >
                   <span className="h-3 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
-                  2+ shifts / OT
+                  2+ shifts / Day off / OT
                 </span>
                 <span
                   title="Overlapping shifts or conflicting pinned shifts blocking Auto-schedule"
@@ -974,6 +978,9 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
         shifts={schedule.shifts}
         onAddShift={(input) => store.addShiftTemplate(schedule.id, input)}
         onPreviewEditShift={(shiftId) => store.previewEditShift(schedule.id, shiftId)}
+        onPreviewDisableShiftDays={(shiftId, nextDays) =>
+          store.previewDisableShiftDays(schedule.id, shiftId, nextDays)
+        }
         onUpdateShift={(shiftId, input) => store.updateShiftTemplate(schedule.id, shiftId, input)}
         onPreviewDeleteShift={(shiftId) => store.previewDeleteShift(schedule.id, shiftId)}
         onDeleteShift={(shiftId) => store.deleteShiftTemplate(schedule.id, shiftId)}

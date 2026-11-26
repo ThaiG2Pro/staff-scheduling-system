@@ -212,3 +212,91 @@ describe('Slice 4: Schedule Health Bar & P0 Aggregated Summary 7x16 (AC-05)', ()
     expect(screen.getByText(/1\. Transactions/i)).toBeTruthy();
   });
 });
+
+describe('Phase 2: Inactive Roster Cells, Day-Off Guidance/Badge & UNAVAILABLE_DAY Pin Conflict', () => {
+  it('renders disabled/hatched cells hiding + Add on inactive shift days, soft-override Day off badge, and blocks UNAVAILABLE_DAY Pin Conflict (AC-P2-004, AC-P2-009, AC-P2-011)', async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        bootstrapState={makeNormalBootstrap()}
+        storeOptions={{ deps: createTestDeps(), getStorage: createMemoryStorage }}
+      />,
+    );
+
+    await user.click(screen.getAllByRole('button', { name: /Load Demo Store/i })[0]!);
+
+    // 1. Restrict 07:00 – 15:00 to Mon–Fri -> Sat & Sun cells render disabled/hatched & hide + Add (AC-P2-004)
+    await user.click(screen.getByRole('button', { name: /^Shifts$/i }));
+    const shiftsDialog = screen.getByRole('dialog');
+    await user.click(within(shiftsDialog).getByRole('button', { name: /Edit shift 07:00 – 15:00/i }));
+    const editDaysGroup = within(shiftsDialog).getByRole('group', {
+      name: /Active days for shift 07:00 – 15:00/i,
+    });
+    await user.click(within(editDaysGroup).getByRole('button', { name: 'Sat' }));
+    await user.click(within(editDaysGroup).getByRole('button', { name: 'Sun' }));
+    await user.click(within(shiftsDialog).getByRole('button', { name: /^Save$/i }));
+    await user.click(within(shiftsDialog).getByRole('button', { name: /^Done$/i }));
+
+    const table = screen.getByRole('table');
+    const inactiveCells = table.querySelectorAll('td[data-inactive-cell="true"]');
+    expect(inactiveCells.length).toBe(2);
+    expect(screen.queryByRole('button', { name: /Add staff to Sat 07:00 – 15:00/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Add staff to Sun 07:00 – 15:00/i })).toBeNull();
+
+    // 2. Mark Alice Nguyen unavailable on Wed -> guidance warns STAFF_UNAVAILABLE_ON_DAY & allows manual override (AC-P2-009)
+    await user.click(screen.getByRole('button', { name: /Edit Alice Nguyen/i }));
+    const staffDialog = screen.getByRole('dialog');
+    const unavailGroup = within(staffDialog).getByRole('group', { name: /Unavailable days/i });
+    await user.click(within(unavailGroup).getByRole('button', { name: 'Wed' }));
+    await user.click(within(staffDialog).getByRole('button', { name: /Save Changes/i }));
+
+    await user.click(screen.getByRole('button', { name: /Add staff to Wed 07:00 – 15:00/i }));
+    const popover = screen.getByRole('dialog');
+    expect(within(popover).getByText(/Requires attention/i)).toBeTruthy();
+    expect(within(popover).getByText(/Marked unavailable on Wed/i)).toBeTruthy();
+    await user.click(within(popover).getByRole('button', { name: /Alice Nguyen/i }));
+    await user.click(within(popover).getByRole('button', { name: /^Confirm$/i }));
+
+    // AssignmentChip shows Day off badge; Hour Limit Warnings remains 0
+    expect(screen.getByLabelText(/Staff unavailable on this day/i)).toBeTruthy();
+    const healthSection = screen.getByRole('region', { name: /Schedule health/i });
+    expect(
+      within(healthSection).getByTitle(/All team members are within their weekly hour limits/i),
+    ).toBeTruthy();
+
+    // 3. Pin Alice's Wed shift & click Auto-schedule -> blocked by UNAVAILABLE_DAY Pin Conflict (AC-P2-011)
+    await user.click(screen.getByRole('button', { name: /^Pin Alice Nguyen$/i }));
+    await user.click(screen.getByRole('button', { name: /Auto-schedule/i }));
+    expect(screen.getByText(/Auto-schedule blocked — resolve conflicting pinned shifts/i)).toBeTruthy();
+    expect(screen.getByText(/marked as unavailable/i)).toBeTruthy();
+  });
+
+  it('only marks assignments as New when (day, shiftId, staffId) did not exist before Auto-schedule', async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        bootstrapState={makeNormalBootstrap()}
+        storeOptions={{ deps: createTestDeps(), getStorage: createMemoryStorage }}
+      />,
+    );
+
+    // Load Demo Store (starts with empty assignments)
+    await user.click(screen.getAllByRole('button', { name: /Load Demo Store/i })[0]!);
+
+    // 1st Auto-schedule on empty roster -> every created assignment shows "New"
+    await user.click(screen.getByRole('button', { name: /^Auto-schedule$/i }));
+    const initialNewBadges = screen.getAllByText(/^New$/);
+    expect(initialNewBadges.length).toBeGreaterThan(0);
+
+    // 2nd Auto-schedule with identical inputs -> same (day, shift, staff) positions -> 0 "New" badges
+    await user.click(screen.getByRole('button', { name: /^Auto-schedule$/i }));
+    expect(screen.queryAllByText(/^New$/).length).toBe(0);
+
+    // Remove 1 assignment and re-run Auto-schedule -> only the re-added slot gets "New"
+    const removeButtons = screen.getAllByRole('button', { name: /^Remove /i });
+    await user.click(removeButtons[0]!);
+    await user.click(screen.getByRole('button', { name: /^Auto-schedule$/i }));
+    const diffNewBadges = screen.getAllByText(/^New$/);
+    expect(diffNewBadges.length).toBe(1);
+  });
+});

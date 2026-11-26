@@ -283,7 +283,9 @@ export function AssignmentGuidancePopover({
                       </div>
                       <ul className="pl-5 text-[11px] text-amber-900">
                         {opt.reasons.map((r, idx) => (
-                          <li key={idx}>{r.message}</li>
+                          <li key={idx} data-reason-code={r.code}>
+                            {r.message}
+                          </li>
                         ))}
                       </ul>
                     </button>

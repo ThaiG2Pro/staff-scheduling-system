@@ -1,15 +1,20 @@
 /**
- * @file Add / Edit Staff modal with strictly 2 fields: Name and Max Weekly Hours (`AC-01`).
+ * @file Add / Edit Staff modal with Name, Max Weekly Hours, and optional 7-day Unavailability toggles (`AC-01`, `AC-P2-008`).
  */
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { X } from 'lucide-react';
-import type { Staff } from '../../domain/types';
+import type { DayOfWeek, Staff } from '../../domain/types';
+import { WeekdayToggleGroup } from '../common/WeekdayToggleGroup';
 
 export interface StaffFormModalProps {
   open: boolean;
   editingStaff: Staff | null;
-  onSubmit: (input: { name: string; maxWeeklyHours: number }) => { ok: boolean; error?: string };
+  onSubmit: (input: {
+    name: string;
+    maxWeeklyHours: number;
+    unavailableDays?: DayOfWeek[];
+  }) => { ok: boolean; error?: string };
   onClose: () => void;
 }
 
@@ -28,12 +33,14 @@ export function StaffFormModal({
 }: StaffFormModalProps) {
   const [name, setName] = useState('');
   const [maxHoursRaw, setMaxHoursRaw] = useState('40');
+  const [unavailableDays, setUnavailableDays] = useState<DayOfWeek[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setName(editingStaff?.name ?? '');
     setMaxHoursRaw(editingStaff ? String(editingStaff.maxWeeklyHours) : '40');
+    setUnavailableDays(editingStaff?.unavailableDays ? [...editingStaff.unavailableDays] : []);
     setError(null);
   }, [open, editingStaff]);
 
@@ -68,7 +75,7 @@ export function StaffFormModal({
       return;
     }
 
-    const res = onSubmit({ name: trimmedName, maxWeeklyHours: parsedHours });
+    const res = onSubmit({ name: trimmedName, maxWeeklyHours: parsedHours, unavailableDays });
     if (!res.ok) {
       setError(res.error ?? 'Unable to save staff member.');
       return;
@@ -142,6 +149,27 @@ export function StaffFormModal({
               />
               <p className="mt-1 text-xs text-slate-600">
                 Enter 0 for temporarily unavailable staff (excluded from Auto-schedule).
+              </p>
+            </div>
+
+            <div>
+              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-700">
+                Unavailable Days (Days Off)
+              </span>
+              <WeekdayToggleGroup
+                selectedDays={unavailableDays}
+                onChange={(nextDays) => {
+                  setUnavailableDays(nextDays);
+                  if (error) setError(null);
+                }}
+                minSelected={0}
+                tone="off"
+                groupLabel="Unavailable days"
+                size="md"
+              />
+              <p className="mt-1.5 text-xs text-slate-600">
+                Auto-schedule skips selected days. Marking all 7 days off excludes this staff from
+                Auto-schedule.
               </p>
             </div>
 

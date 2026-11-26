@@ -5,6 +5,7 @@ import { runAutoSchedule } from '../domain/autoScheduler';
 import { DAYS_OF_WEEK, OPERATING_HOURS } from '../domain/constants';
 import { parseCsvTransactions } from '../domain/csvParser';
 import { computeStaffHoursGrid, computeUnionAssignedHours } from '../domain/hardRules';
+import type { SchedulerTraceObserver, TraceEvent } from '../domain/schedulerTrace';
 import type {
   Assignment,
   AutoScheduleInput,
@@ -556,5 +557,326 @@ describe('autoScheduler (T-09, T-10, T-11, T-12, T-13, AC-03)', () => {
     const day2Assign = res.assignments.find((a) => a.day === 2);
     expect(day2Assign?.staffId).toBe('bob');
     expect(day2Assign?.isPinned).toBe(false);
+  });
+});
+
+describe('Phase 2: Shift Active Days & Staff Unavailability in Auto-Scheduler', () => {
+  it('skips inactive shift days in Stage 1A, 1B, and trace candidates via shiftDayMask (AC-P2-006)', () => {
+    const grid = createZeroGrid();
+    // Demand on Mon (0) and Sat (5) at 07:00-15:00
+    for (let h = 7; h < 15; h++) {
+      grid[0][h as OperatingHour] = 30; // req 2 on Mon
+      grid[5][h as OperatingHour] = 30; // req 2 on Sat
+    }
+
+    const shifts: ShiftTemplate[] = [
+      { id: 'weekend-morning', startHour: 7, endHour: 15, daysOfWeek: [5, 6] },
+    ];
+    const staff: Staff[] = [
+      { id: 's1', name: 'Alice', maxWeeklyHours: 40 },
+      { id: 's2', name: 'Bob', maxWeeklyHours: 40 },
+    ];
+
+    const traceEvents: Omit<TraceEvent, 'seq'>[] = [];
+    const observer: SchedulerTraceObserver = { emit: (e) => traceEvents.push(e) };
+    const res = runAutoSchedule(
+      {
+        demand: makeDemand(grid),
+        staff,
+        shifts,
+        existingAssignments: [],
+        targetTxnsPerStaffHour: 15,
+        idGenerator: makeSeqIdGen('p2-mask'),
+      },
+      { observer },
+    );
+
+    expect(res.status).toBe('SUCCESS');
+    if (res.status !== 'SUCCESS') return;
+
+    // Zero assignments on Mon (0) or any weekday 0..4; 2 assignments on Sat (5)
+    expect(res.assignments.every((a) => a.day === 5 || a.day === 6)).toBe(true);
+    expect(res.assignments.filter((a) => a.day === 5)).toHaveLength(2);
+    // Trace candidates must not include Mon for weekend-morning
+    const stage1Steps = traceEvents.filter(
+      (e) => e.stageId === 'stage_1a_gaps' || e.stageId === 'stage_1b_deficit',
+    );
+    for (const ev of stage1Steps) {
+      for (const cand of ev.candidates ?? []) {
+        expect(cand.id).not.toMatch(/^(win|run|rej)-0-weekend-morning/);
+      }
+    }
+  });
+
+  it('computes 2D cellCoverable uncoverable vs residual shortage in schedulerDiagnostics (AC-P2-007)', () => {
+    const grid = createZeroGrid();
+    // Mon (0) hour 7: req 2 (uncoverable because shift is Sat-Sun only)
+    grid[0][7] = 30;
+    // Sat (5) hour 7: req 2 (coverable, but only 1 staff with 8h -> 1 covered, 1 residual shortage)
+    grid[5][7] = 30;
+
+    const res = runAutoSchedule({
+      demand: makeDemand(grid),
+      staff: [{ id: 's1', name: 'Alice', maxWeeklyHours: 8 }],
+      shifts: [{ id: 'wknd', startHour: 7, endHour: 15, daysOfWeek: [5, 6] }],
+      existingAssignments: [],
+      targetTxnsPerStaffHour: 15,
+      idGenerator: makeSeqIdGen('p2-2d'),
+    });
+
+    expect(res.status).toBe('SUCCESS');
+    if (res.status !== 'SUCCESS') return;
+    expect(res.diagnostics.totalRequiredStaffHours).toBe(4);
+    expect(res.diagnostics.coveredRequiredStaffHours).toBe(1);
+    expect(res.diagnostics.shortageHours).toBe(3);
+    expect(res.diagnostics.uncoverableRequiredStaffHours).toBe(2);
+    expect(res.diagnostics.residualCoverableShortageHours).toBe(1);
+  });
+
+  it('excludes 7-day-unavailable staff from eligibleStaff, Jain Index, and triggers ELIGIBLE_STAFF gate (AC-P2-010)', () => {
+    const grid = createZeroGrid();
+    grid[0][7] = 15;
+    const shifts: ShiftTemplate[] = [{ id: 'm', startHour: 7, endHour: 15 }];
+
+    // Only staff has all 7 days unavailable -> MISSING_INPUT: ELIGIBLE_STAFF
+    const blockedRes = runAutoSchedule({
+      demand: makeDemand(grid),
+      staff: [
+        { id: 'off-all', name: 'On Leave', maxWeeklyHours: 40, unavailableDays: [0, 1, 2, 3, 4, 5, 6] },
+      ],
+      shifts,
+      existingAssignments: [],
+      targetTxnsPerStaffHour: 15,
+      idGenerator: makeSeqIdGen('p2-elig'),
+    });
+    expect(blockedRes.status).toBe('FAILED');
+    if (blockedRes.status === 'FAILED') {
+      expect(blockedRes.reasonCode).toBe('MISSING_INPUT');
+      expect(blockedRes.missingInputs).toContain('ELIGIBLE_STAFF');
+    }
+
+    // With 1 eligible + 1 7-day-off staff -> only eligible staff is scheduled, Jain = 1.0 (not 0.5)
+    const okRes = runAutoSchedule({
+      demand: makeDemand(grid),
+      staff: [
+        { id: 'active', name: 'Alice', maxWeeklyHours: 40 },
+        { id: 'off-all', name: 'On Leave', maxWeeklyHours: 40, unavailableDays: [0, 1, 2, 3, 4, 5, 6] },
+      ],
+      shifts,
+      existingAssignments: [],
+      targetTxnsPerStaffHour: 15,
+      idGenerator: makeSeqIdGen('p2-elig2'),
+    });
+    expect(okRes.status).toBe('SUCCESS');
+    if (okRes.status === 'SUCCESS') {
+      expect(okRes.assignments.every((a) => a.staffId === 'active')).toBe(true);
+      expect(okRes.diagnostics.fairnessJainIndex).toBeCloseTo(1.0, 9);
+      expect(okRes.diagnostics.unscheduledEligibleStaffCount).toBe(0);
+    }
+  });
+
+  it('blocks Auto-schedule on single UNAVAILABLE_DAY pinned conflict, while clearing unpinned ones (AC-P2-011)', () => {
+    const grid = createZeroGrid();
+    grid[2][7] = 15; // Wed
+    const shifts: ShiftTemplate[] = [{ id: 'm', startHour: 7, endHour: 15 }];
+    const staff: Staff[] = [
+      { id: 's1', name: 'Alice', maxWeeklyHours: 40, unavailableDays: [2] }, // Off Wed
+      { id: 's2', name: 'Bob', maxWeeklyHours: 40 },
+    ];
+
+    // 1. Single pinned assignment on Wed -> BLOCKED_PIN_CONFLICT (UNAVAILABLE_DAY)
+    const pinRes = runAutoSchedule({
+      demand: makeDemand(grid),
+      staff,
+      shifts,
+      existingAssignments: [
+        { id: 'pin-wed', day: 2, shiftId: 'm', staffId: 's1', isPinned: true },
+      ],
+      targetTxnsPerStaffHour: 15,
+      idGenerator: makeSeqIdGen('p2-pin'),
+    });
+    expect(pinRes.status).toBe('BLOCKED_PIN_CONFLICT');
+    if (pinRes.status === 'BLOCKED_PIN_CONFLICT') {
+      expect(pinRes.conflicts).toHaveLength(1);
+      expect(pinRes.conflicts[0]?.type).toBe('UNAVAILABLE_DAY');
+      expect(pinRes.conflicts[0]?.assignmentIds).toEqual(['pin-wed']);
+    }
+
+    // 2. Unpinned assignment on Wed -> cleared & re-scheduled to Bob without blocking
+    const unpinnedRes = runAutoSchedule({
+      demand: makeDemand(grid),
+      staff,
+      shifts,
+      existingAssignments: [
+        { id: 'unpin-wed', day: 2, shiftId: 'm', staffId: 's1', isPinned: false },
+      ],
+      targetTxnsPerStaffHour: 15,
+      idGenerator: makeSeqIdGen('p2-unpin'),
+    });
+    expect(unpinnedRes.status).toBe('SUCCESS');
+    if (unpinnedRes.status === 'SUCCESS') {
+      expect(unpinnedRes.assignments).toHaveLength(1);
+      expect(unpinnedRes.assignments[0]?.staffId).toBe('s2');
+    }
+  });
+
+  it('enforces unavailableMask in Stage 1 pickBestFitStaff (AC-P2-012)', () => {
+    const grid = createZeroGrid();
+    for (let h = 7; h < 15; h++) {
+      grid[0][h as OperatingHour] = 15; // Mon
+      grid[1][h as OperatingHour] = 15; // Tue
+    }
+    const shifts: ShiftTemplate[] = [{ id: 'm', startHour: 7, endHour: 15 }];
+    // Alice has 8h (tighter Best-Fit slack on Mon!), but is unavailable on Mon (0)
+    const staff: Staff[] = [
+      { id: 's1', name: 'Alice', maxWeeklyHours: 8, unavailableDays: [0] },
+      { id: 's2', name: 'Bob', maxWeeklyHours: 16, unavailableDays: [1] },
+    ];
+
+    const res = runAutoSchedule({
+      demand: makeDemand(grid),
+      staff,
+      shifts,
+      existingAssignments: [],
+      targetTxnsPerStaffHour: 15,
+      idGenerator: makeSeqIdGen('p2-s1'),
+    });
+    expect(res.status).toBe('SUCCESS');
+    if (res.status !== 'SUCCESS') return;
+
+    const mon = res.assignments.find((a) => a.day === 0);
+    const tue = res.assignments.find((a) => a.day === 1);
+    expect(mon?.staffId).toBe('s2');
+    expect(tue?.staffId).toBe('s1');
+  });
+
+  it('preserves unavailableMask and 112-cell coverage during Stage 2 REASSIGN and cross-day SWAP (AC-P2-013, AC-P2-014)', () => {
+    const grid = createZeroGrid();
+    // Day 0 (Mon): 8h shift, Day 1 (Tue): 4h shift, Day 2 (Wed): 8h shift
+    for (let h = 7; h < 15; h++) {
+      grid[0][h as OperatingHour] = 15;
+      grid[2][h as OperatingHour] = 15;
+    }
+    for (let h = 15; h < 19; h++) {
+      grid[1][h as OperatingHour] = 15;
+    }
+
+    const shifts: ShiftTemplate[] = [
+      { id: 'long', startHour: 7, endHour: 15 },
+      { id: 'short', startHour: 15, endHour: 19 },
+    ];
+    // s1 unavailable on Tue(1); s2 unavailable on Mon(0).
+    // Stage 2 REASSIGN & cross-day SWAP must NEVER move Mon(0) to s2 or Tue(1) to s1!
+    const staff: Staff[] = [
+      { id: 's1', name: 'Alice', maxWeeklyHours: 24, unavailableDays: [1] },
+      { id: 's2', name: 'Bob', maxWeeklyHours: 16, unavailableDays: [0] },
+    ];
+
+    const res = runAutoSchedule({
+      demand: makeDemand(grid),
+      staff,
+      shifts,
+      existingAssignments: [],
+      targetTxnsPerStaffHour: 15,
+      idGenerator: makeSeqIdGen('p2-s2'),
+    });
+    expect(res.status).toBe('SUCCESS');
+    if (res.status !== 'SUCCESS') return;
+
+    // Verify zero assignments on unavailable days
+    for (const a of res.assignments) {
+      const st = staff.find((s) => s.id === a.staffId)!;
+      expect(st.unavailableDays ?? []).not.toContain(a.day);
+    }
+
+    // Verify 100% coverage preserved
+    expect(res.diagnostics.demandCoverage).toBe(1);
+    const shiftMap = new Map(shifts.map((s) => [s.id, s]));
+    const gridAfter = computeStaffHoursGrid(res.assignments, shiftMap);
+    for (let h = 7; h < 15; h++) {
+      expect(gridAfter[0 * 16 + (h - 7)]).toBe(1);
+      expect(gridAfter[2 * 16 + (h - 7)]).toBe(1);
+    }
+    for (let h = 15; h < 19; h++) {
+      expect(gridAfter[1 * 16 + (h - 7)]).toBe(1);
+    }
+  });
+
+  it('prioritizes staff with fewer available days (MRV) to preserve flexible staff for scarce weekend days (AC-P2-011)', () => {
+    const grid = createZeroGrid();
+    // All 7 days need 1 staff for 07:00-15:00 (56h total)
+    for (const d of [0, 1, 2, 3, 4, 5, 6] as const) {
+      for (let h = 7; h < 15; h++) {
+        grid[d][h as OperatingHour] = 15;
+      }
+    }
+
+    const shifts: ShiftTemplate[] = [{ id: 'day-8h', startHour: 7, endHour: 15 }];
+    // s1-flex sorts BEFORE s2-weekdays by id and has identical 40h cap;
+    // without MRV, s1-flex would absorb Mon-Fri (40/40h) and leave Sat-Sun uncovered.
+    const staff: Staff[] = [
+      { id: 's1-flex', name: 'Flex', maxWeeklyHours: 40 },
+      { id: 's2-weekdays', name: 'WeekdaysOnly', maxWeeklyHours: 40, unavailableDays: [5, 6] },
+    ];
+
+    const res = runAutoSchedule({
+      demand: makeDemand(grid),
+      staff,
+      shifts,
+      existingAssignments: [],
+      targetTxnsPerStaffHour: 15,
+      idGenerator: makeSeqIdGen('p2-mrv-weekend'),
+    });
+
+    expect(res.status).toBe('SUCCESS');
+    if (res.status !== 'SUCCESS') return;
+
+    // 100% coverage across all 7 days (56/56h)
+    expect(res.diagnostics.demandCoverage).toBe(1);
+    expect(res.assignments).toHaveLength(7);
+    // Weekend days must be covered by s1-flex
+    const sat = res.assignments.find((a) => a.day === 5);
+    const sun = res.assignments.find((a) => a.day === 6);
+    expect(sat?.staffId).toBe('s1-flex');
+    expect(sun?.staffId).toBe('s1-flex');
+    // s2-weekdays must never be scheduled on Sat/Sun
+    expect(
+      res.assignments.filter((a) => a.staffId === 's2-weekdays').every((a) => a.day < 5),
+    ).toBe(true);
+  });
+
+  it('prefers staff with fewer available days over lower slack on their rare available day (AC-P2-011)', () => {
+    const grid = createZeroGrid();
+    // Only Mon (0) and Wed (2) need 1 staff for 07:00-15:00
+    for (let h = 7; h < 15; h++) {
+      grid[0][h as OperatingHour] = 15;
+      grid[2][h as OperatingHour] = 15;
+    }
+
+    const shifts: ShiftTemplate[] = [{ id: 'day-8h', startHour: 7, endHour: 15 }];
+    // s1-full has lower slack (24-8=16) than s2-rare (40-8=32),
+    // but s2-rare is ONLY available on Mon (0).
+    const staff: Staff[] = [
+      { id: 's1-full', name: 'FullWeek', maxWeeklyHours: 24 },
+      { id: 's2-rare', name: 'MonOnly', maxWeeklyHours: 40, unavailableDays: [1, 2, 3, 4, 5, 6] },
+    ];
+
+    const res = runAutoSchedule({
+      demand: makeDemand(grid),
+      staff,
+      shifts,
+      existingAssignments: [],
+      targetTxnsPerStaffHour: 15,
+      idGenerator: makeSeqIdGen('p2-mrv-rare'),
+    });
+
+    expect(res.status).toBe('SUCCESS');
+    if (res.status !== 'SUCCESS') return;
+
+    expect(res.diagnostics.demandCoverage).toBe(1);
+    const mon = res.assignments.find((a) => a.day === 0);
+    const wed = res.assignments.find((a) => a.day === 2);
+    expect(mon?.staffId).toBe('s2-rare');
+    expect(wed?.staffId).toBe('s1-full');
   });
 });

@@ -16,19 +16,29 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { MAX_SHIFT_END_HOUR, MIN_OPERATING_HOUR } from '../../domain/constants';
-import type { DeletePreview, ShiftTemplate } from '../../domain/types';
+import { DAYS_OF_WEEK, MAX_SHIFT_END_HOUR, MIN_OPERATING_HOUR } from '../../domain/constants';
+import { getShiftActiveDays } from '../../domain/hardRules';
+import type { DayOfWeek, DeletePreview, ShiftTemplate } from '../../domain/types';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { formatHour24, formatShiftRange } from '../common/formatters';
+import { formatWeekdaySummary, WeekdayToggleGroup } from '../common/WeekdayToggleGroup';
 
 export interface ManageShiftsModalProps {
   open: boolean;
   shifts: readonly ShiftTemplate[];
-  onAddShift: (input: { startHour: number; endHour: number }) => { ok: boolean; error?: string };
+  onAddShift: (input: {
+    startHour: number;
+    endHour: number;
+    daysOfWeek?: DayOfWeek[];
+  }) => { ok: boolean; error?: string };
   onPreviewEditShift: (shiftId: string) => DeletePreview;
+  onPreviewDisableShiftDays?: (
+    shiftId: string,
+    nextDaysOfWeek: readonly DayOfWeek[],
+  ) => DeletePreview;
   onUpdateShift: (
     shiftId: string,
-    input: { startHour: number; endHour: number },
+    input: { startHour: number; endHour: number; daysOfWeek?: DayOfWeek[] },
   ) => { ok: boolean; error?: string };
   onPreviewDeleteShift: (shiftId: string) => DeletePreview;
   onDeleteShift: (shiftId: string) => { ok: boolean; error?: string };
@@ -59,6 +69,7 @@ export function ManageShiftsModal({
   shifts,
   onAddShift,
   onPreviewEditShift,
+  onPreviewDisableShiftDays,
   onUpdateShift,
   onPreviewDeleteShift,
   onDeleteShift,
@@ -67,11 +78,13 @@ export function ManageShiftsModal({
 }: ManageShiftsModalProps) {
   const [newStart, setNewStart] = useState(10);
   const [newEnd, setNewEnd] = useState(14);
+  const [newDays, setNewDays] = useState<DayOfWeek[]>([...DAYS_OF_WEEK]);
   const [addError, setAddError] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editStart, setEditStart] = useState(7);
   const [editEnd, setEditEnd] = useState(15);
+  const [editDays, setEditDays] = useState<DayOfWeek[]>([...DAYS_OF_WEEK]);
   const [editError, setEditError] = useState<string | null>(null);
 
   const [draggedShiftId, setDraggedShiftId] = useState<string | null>(null);
@@ -82,24 +95,34 @@ export function ManageShiftsModal({
     affectedCount: number;
   } | null>(null);
 
+  const [confirmDisableTarget, setConfirmDisableTarget] = useState<{
+    shiftId: string;
+    startHour: number;
+    endHour: number;
+    daysOfWeek: DayOfWeek[];
+    affectedCount: number;
+  } | null>(null);
+
   useEffect(() => {
     if (!open) return;
+    setNewDays([...DAYS_OF_WEEK]);
     setAddError(null);
     setEditingId(null);
     setEditError(null);
     setDraggedShiftId(null);
     setDragOverShiftId(null);
     setDeleteTarget(null);
+    setConfirmDisableTarget(null);
   }, [open]);
 
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !deleteTarget) onClose();
+      if (event.key === 'Escape' && !deleteTarget && !confirmDisableTarget) onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [open, deleteTarget, onClose]);
+  }, [open, deleteTarget, confirmDisableTarget, onClose]);
 
   if (!open) return null;
 
@@ -128,29 +151,53 @@ export function ManageShiftsModal({
 
   const handleAddSubmit = (event: FormEvent) => {
     event.preventDefault();
-    const res = onAddShift({ startHour: newStart, endHour: newEnd });
+    const res = onAddShift({ startHour: newStart, endHour: newEnd, daysOfWeek: newDays });
     if (!res.ok) {
       setAddError(res.error ?? 'Unable to add shift template.');
       return;
     }
     setAddError(null);
+    setNewDays([...DAYS_OF_WEEK]);
   };
 
   const startEdit = (shift: ShiftTemplate) => {
     setEditingId(shift.id);
     setEditStart(shift.startHour);
     setEditEnd(shift.endHour);
+    setEditDays([...getShiftActiveDays(shift)]);
     setEditError(null);
   };
 
-  const commitEdit = (shiftId: string) => {
-    const res = onUpdateShift(shiftId, { startHour: editStart, endHour: editEnd });
+  const applyEdit = (
+    shiftId: string,
+    payload: { startHour: number; endHour: number; daysOfWeek: DayOfWeek[] },
+  ) => {
+    const res = onUpdateShift(shiftId, payload);
     if (!res.ok) {
       setEditError(res.error ?? 'Unable to update shift template.');
       return;
     }
     setEditingId(null);
     setEditError(null);
+  };
+
+  const commitEdit = (shiftId: string) => {
+    const disablePreview = onPreviewDisableShiftDays
+      ? onPreviewDisableShiftDays(shiftId, editDays)
+      : { affectedAssignmentsCount: 0, affectedAssignmentIds: [] };
+
+    if (disablePreview.affectedAssignmentsCount > 0) {
+      setConfirmDisableTarget({
+        shiftId,
+        startHour: editStart,
+        endHour: editEnd,
+        daysOfWeek: editDays,
+        affectedCount: disablePreview.affectedAssignmentsCount,
+      });
+      return;
+    }
+
+    applyEdit(shiftId, { startHour: editStart, endHour: editEnd, daysOfWeek: editDays });
   };
 
   const requestDelete = (shift: ShiftTemplate) => {
@@ -311,6 +358,25 @@ export function ManageShiftsModal({
                               </div>
                             </div>
 
+                            <div className="space-y-1">
+                              <span className="block text-[11px] font-medium text-slate-600">
+                                Active days (min 1)
+                              </span>
+                              <WeekdayToggleGroup
+                                selectedDays={editDays}
+                                onChange={(nextDays) => {
+                                  setEditDays(nextDays);
+                                  if (editError) setEditError(null);
+                                }}
+                                minSelected={1}
+                                onMinSelectedBlocked={() =>
+                                  setEditError('A shift template must be active on at least 1 day.')
+                                }
+                                tone="active"
+                                groupLabel={`Active days for shift ${formatShiftRange(shift.startHour, shift.endHour)}`}
+                              />
+                            </div>
+
                             {editingAffectedCount > 0 && (
                               <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                                 <AlertTriangle
@@ -349,6 +415,15 @@ export function ManageShiftsModal({
                                 </span>
                                 <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
                                   {duration}h
+                                </span>
+                                <span
+                                  className={`ml-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                                    shift.daysOfWeek
+                                      ? 'bg-indigo-50 text-indigo-700'
+                                      : 'bg-slate-100 text-slate-600'
+                                  }`}
+                                >
+                                  {formatWeekdaySummary(getShiftActiveDays(shift), 'active')}
                                 </span>
                               </div>
                             </div>
@@ -460,6 +535,24 @@ export function ManageShiftsModal({
                   Add Shift
                 </button>
               </div>
+              <div className="space-y-1">
+                <span className="block text-[11px] font-medium text-slate-600">
+                  Active days (default all 7)
+                </span>
+                <WeekdayToggleGroup
+                  selectedDays={newDays}
+                  onChange={(nextDays) => {
+                    setNewDays(nextDays);
+                    if (addError) setAddError(null);
+                  }}
+                  minSelected={1}
+                  onMinSelectedBlocked={() =>
+                    setAddError('A shift template must be active on at least 1 day.')
+                  }
+                  tone="active"
+                  groupLabel="Active days for new shift"
+                />
+              </div>
               {addError && (
                 <p role="alert" className="text-xs font-medium text-rose-700">
                   {addError}
@@ -503,6 +596,32 @@ export function ManageShiftsModal({
           setDeleteTarget(null);
         }}
         onCancel={() => setDeleteTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={confirmDisableTarget !== null}
+        title="Disable shift on selected day(s)?"
+        description="Saving these active days will remove existing assignments on the disabled day(s)."
+        warningDetail={
+          confirmDisableTarget
+            ? `This will permanently remove ${confirmDisableTarget.affectedCount} existing assignment${
+                confirmDisableTarget.affectedCount === 1 ? '' : 's'
+              } (including any pinned shifts) on the disabled day(s).`
+            : undefined
+        }
+        confirmLabel="Remove & Save"
+        tone="danger"
+        onConfirm={() => {
+          if (!confirmDisableTarget) return;
+          const target = confirmDisableTarget;
+          setConfirmDisableTarget(null);
+          applyEdit(target.shiftId, {
+            startHour: target.startHour,
+            endHour: target.endHour,
+            daysOfWeek: target.daysOfWeek,
+          });
+        }}
+        onCancel={() => setConfirmDisableTarget(null)}
       />
     </>
   );

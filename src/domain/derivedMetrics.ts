@@ -11,7 +11,7 @@ import {
   OPERATING_HOURS,
 } from './constants';
 import { computeRequiredStaff, isValidTargetN, safeBigIntToNumber } from './decimalMath';
-import { computeStaffHoursGrid } from './hardRules';
+import { buildCellCoverableGrid, computeStaffHoursGrid, isStaffEligible } from './hardRules';
 import { computeAllStaffMetrics, computeFairnessJainIndex } from './staffMetrics';
 import type {
   AggregatedSummary,
@@ -75,12 +75,7 @@ export function computeWeeklySummary(
     }
   | { ok: false; error: 'INVALID_INPUT' | 'SAFE_INTEGER_OVERFLOW'; message: string } {
   const staffHoursGrid = computeStaffHoursGrid(schedule.assignments, shiftMap);
-  const hourCoverable = new Uint8Array(16);
-  for (const sh of schedule.shifts) {
-    for (let h = sh.startHour; h < sh.endHour; h++) {
-      if (h >= 7 && h <= 22) hourCoverable[h - 7] = 1;
-    }
-  }
+  const cellCoverable = buildCellCoverableGrid(schedule.shifts);
 
   const cells = {} as Record<DayOfWeek, Record<OperatingHour, SummaryCell>>;
   let totalTransactionsBigInt = 0n;
@@ -141,7 +136,7 @@ export function computeWeeklySummary(
         coveredRequiredBigInt += shBig < reqBig ? shBig : reqBig;
         shortageBigInt += reqBig > shBig ? reqBig - shBig : 0n;
         overstaffedBigInt += shBig > reqBig ? shBig - reqBig : 0n;
-        if (hourCoverable[h - 7] === 0) uncoverableBigInt += reqBig;
+        if (cellCoverable[idx] === 0 && reqBig > shBig) uncoverableBigInt += reqBig - shBig;
 
         if (
           totalRequiredBigInt > MAX_SAFE_BIGINT ||
@@ -215,7 +210,7 @@ export function getMissingAutoScheduleInputs(schedule: Readonly<Schedule>): Miss
   const missing: MissingInputCode[] = [];
   if (schedule.demand === null) missing.push('DEMAND');
   if (schedule.shifts.length === 0) missing.push('SHIFTS');
-  if (!schedule.staff.some((s) => s.maxWeeklyHours > 0)) missing.push('ELIGIBLE_STAFF');
+  if (!schedule.staff.some(isStaffEligible)) missing.push('ELIGIBLE_STAFF');
   if (!isValidTargetN(schedule.targetTxnsPerStaffHour)) missing.push('INVALID_N');
   return missing;
 }

@@ -5,6 +5,7 @@
  */
 
 import { MAX_SAFE_BIGINT } from './constants';
+import { buildCellCoverableGrid } from './hardRules';
 import { computeJainFromSums, type SchedulerWorkingState } from './schedulerState';
 import type { AutoScheduleDiagnostics, RebalanceStopReason } from './types';
 
@@ -82,12 +83,7 @@ export function buildAutoScheduleDiagnostics(params: {
     rebalanceStopReason,
   } = params;
 
-  const hourCoverable = new Uint8Array(16);
-  for (const sh of state.sortedShifts) {
-    for (let h = sh.startHour; h < sh.endHour; h++) {
-      if (h >= 7 && h <= 22) hourCoverable[h - 7] = 1;
-    }
-  }
+  const cellCoverable = buildCellCoverableGrid(state.sortedShifts);
 
   let coveredBigInt = 0n;
   let shortageBigInt = 0n;
@@ -103,7 +99,7 @@ export function buildAutoScheduleDiagnostics(params: {
       coveredBigInt += curBig < reqBig ? curBig : reqBig;
       if (reqBig > curBig) shortageBigInt += reqBig - curBig;
       else if (curBig > reqBig) overstaffedBigInt += curBig - reqBig;
-      if (hourCoverable[hIdx] === 0) uncoverableBigInt += reqBig;
+      if (cellCoverable[idx] === 0 && reqBig > curBig) uncoverableBigInt += reqBig - curBig;
 
       if (
         coveredBigInt > MAX_SAFE_BIGINT ||

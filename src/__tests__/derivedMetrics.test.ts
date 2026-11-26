@@ -4,6 +4,7 @@ import {
   evaluateStaffGuidance,
   previewDeleteShift,
   previewDeleteStaff,
+  previewDisableShiftDays,
   validateCandidateAssignments,
 } from '../domain/constraints';
 import {
@@ -419,5 +420,141 @@ describe('derivedMetrics & constraints (T-06, T-07, T-08, AC-01, AC-03)', () => 
     if (!overflowRes.ok) {
       expect(overflowRes.error).toBe('SAFE_INTEGER_OVERFLOW');
     }
+  });
+});
+
+describe('Phase 2: 2D cellCoverable, isStaffEligible, Unavailable Warnings & Candidate Validation', () => {
+  it('computes 2D cellCoverable uncoverableRequiredStaffHours & residualCoverableShortageHours per day (AC-P2-007)', () => {
+    const grid = createZeroGrid();
+    // Mon (0) hour 8: req 2 (uncoverable — shift only active Sat-Sun)
+    grid[0][8] = 30;
+    // Sat (5) hour 8: req 2 (coverable — shift active Sat-Sun, 0 staff assigned -> residual shortage 2)
+    grid[5][8] = 30;
+
+    const schedule: Schedule = {
+      id: 'sched-2d',
+      name: '2D Coverability',
+      createdAt: '2026-08-07T00:00:00.000Z',
+      updatedAt: '2026-08-07T00:00:00.000Z',
+      targetTxnsPerStaffHour: 15,
+      staff: [{ id: 's1', name: 'Alice', maxWeeklyHours: 20 }],
+      shifts: [{ id: 'wknd', startHour: 7, endHour: 15, daysOfWeek: [5, 6] }],
+      demand: { importedAt: '2026-08-07T00:00:00.000Z', transactions: grid },
+      assignments: [],
+    };
+
+    const res = deriveScheduleViewModel(schedule);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    const cov = res.viewModel.health.demandCoverage!;
+    expect(cov.totalRequiredStaffHours).toBe(4);
+    expect(cov.shortageHours).toBe(4);
+    expect(cov.uncoverableRequiredStaffHours).toBe(2);
+    expect(cov.residualCoverableShortageHours).toBe(2);
+  });
+
+  it('flags STAFF_UNAVAILABLE_ON_DAY in guidance and isUnavailableDay on warnings without incrementing hourLimitWarningCount (AC-P2-009)', () => {
+    const schedule: Schedule = {
+      id: 'sched-unavail',
+      name: 'Unavailable Warning Test',
+      createdAt: '2026-08-07T00:00:00.000Z',
+      updatedAt: '2026-08-07T00:00:00.000Z',
+      targetTxnsPerStaffHour: 15,
+      staff: [
+        { id: 's1', name: 'Alice', maxWeeklyHours: 40, unavailableDays: [2] }, // Off Wed
+        { id: 's2', name: 'Bob', maxWeeklyHours: 40 },
+      ],
+      shifts: [{ id: 'sh1', startHour: 7, endHour: 15 }],
+      demand: null,
+      assignments: [{ id: 'a1', day: 2, shiftId: 'sh1', staffId: 's1', isPinned: false }],
+    };
+
+    // Guidance classifies Alice under requiresAttention with STAFF_UNAVAILABLE_ON_DAY
+    const guidance = evaluateStaffGuidance(
+      2,
+      schedule.shifts[0]!,
+      schedule.staff,
+      schedule.shifts,
+      [],
+    );
+    expect(guidance.eligible.map((o) => o.staff.id)).toEqual(['s2']);
+    expect(guidance.requiresAttention.map((o) => o.staff.id)).toEqual(['s1']);
+    expect(guidance.requiresAttention[0]?.reasons.map((r) => r.code)).toContain(
+      'STAFF_UNAVAILABLE_ON_DAY',
+    );
+
+    // Derived warnings set isUnavailableDay=true while hourLimitWarningCount stays 0
+    const res = deriveScheduleViewModel(schedule);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.viewModel.assignmentWarnings['a1']?.isUnavailableDay).toBe(true);
+    expect(res.viewModel.health.hourLimitWarningCount).toBe(0);
+  });
+
+  it('excludes 7-day-unavailable staff from utilization, unusedCapacityHours, Jain Index, and ELIGIBLE_STAFF gate (AC-P2-010)', () => {
+    const base: Schedule = {
+      id: 'sched-7off',
+      name: '7 Days Off',
+      createdAt: '2026-08-07T00:00:00.000Z',
+      updatedAt: '2026-08-07T00:00:00.000Z',
+      targetTxnsPerStaffHour: 15,
+      staff: [
+        { id: 'off', name: 'On Leave', maxWeeklyHours: 40, unavailableDays: [0, 1, 2, 3, 4, 5, 6] },
+      ],
+      shifts: [{ id: 'sh1', startHour: 7, endHour: 15 }],
+      demand: { importedAt: '2026-08-07T00:00:00.000Z', transactions: createZeroGrid() },
+      assignments: [],
+    };
+
+    expect(getMissingAutoScheduleInputs(base)).toEqual(['ELIGIBLE_STAFF']);
+    const vm0 = deriveScheduleViewModel(base);
+    expect(vm0.ok).toBe(true);
+    if (!vm0.ok) return;
+    expect(vm0.viewModel.staffMetrics['off']?.utilization).toBeNull();
+    expect(vm0.viewModel.health.eligibleStaffCount).toBe(0);
+    expect(vm0.viewModel.health.unusedCapacityHours).toBe(0);
+    expect(vm0.viewModel.health.fairnessJainIndex).toBeNull();
+  });
+
+  it('previews exact affected assignments (regular + pinned) in previewDisableShiftDays (AC-P2-005)', () => {
+    const assignments = [
+      { id: 'a-mon', day: 0 as const, shiftId: 'sh1', staffId: 's1', isPinned: false },
+      { id: 'a-sat-pin', day: 5 as const, shiftId: 'sh1', staffId: 's1', isPinned: true },
+      { id: 'a-sun', day: 6 as const, shiftId: 'sh1', staffId: 's2', isPinned: false },
+      { id: 'a-other', day: 6 as const, shiftId: 'sh2', staffId: 's2', isPinned: false },
+    ];
+    const preview = previewDisableShiftDays('sh1', [0, 1, 2, 3, 4], assignments);
+    expect(preview.affectedAssignmentsCount).toBe(2);
+    expect(preview.affectedAssignmentIds).toEqual(['a-sat-pin', 'a-sun']);
+  });
+
+  it('rejects inactive shift days and unavailable staff days in validateCandidateAssignments (AC-P2-014)', () => {
+    const input = {
+      staff: [{ id: 's1', name: 'Alice', maxWeeklyHours: 40, unavailableDays: [2 as const] }],
+      shifts: [{ id: 'sh1', startHour: 7, endHour: 15, daysOfWeek: [0, 1, 2, 3, 4] as (0 | 1 | 2 | 3 | 4)[] }],
+      existingAssignments: [],
+    };
+
+    // Inactive shift day (Sat = 5)
+    const inactiveShiftRes = validateCandidateAssignments(
+      [{ id: 'a1', day: 5, shiftId: 'sh1', staffId: 's1', isPinned: false }],
+      input,
+    );
+    expect(inactiveShiftRes.ok).toBe(false);
+
+    // Unavailable staff day (Wed = 2)
+    const unavailableStaffRes = validateCandidateAssignments(
+      [{ id: 'a2', day: 2, shiftId: 'sh1', staffId: 's1', isPinned: false }],
+      input,
+    );
+    expect(unavailableStaffRes.ok).toBe(false);
+
+    // Valid day (Mon = 0)
+    const validRes = validateCandidateAssignments(
+      [{ id: 'a3', day: 0, shiftId: 'sh1', staffId: 's1', isPinned: false }],
+      input,
+    );
+    expect(validRes.ok).toBe(true);
   });
 });

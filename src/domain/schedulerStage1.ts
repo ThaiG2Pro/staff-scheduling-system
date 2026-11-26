@@ -24,7 +24,7 @@ const STAGE_1A_RULE_HINT: TraceRuleHint = {
   title: 'Thứ tự ưu tiên Stage 1A (Lấp lỗ hổng)',
   rules: [
     'Chọn ca: (1) Nhiều ô trống người nhất (deltaGaps) → (2) Hiệu suất phủ cao nhất (efficiency) → (3) Áp lực giao dịch cao nhất (pressure).',
-    'Chọn người: Best-Fit (ưu tiên người sau khi gán còn ÍT giờ dư nhất để đóng gói khít quỹ giờ, chưa san đều) → Jain Index → ID.',
+    'Chọn người: Ít ngày khả dụng nhất (MRV — giữ người linh hoạt cho ngày khan hiếm) → Best-Fit (ít giờ dư nhất) → Jain Index → ID.',
   ],
 };
 
@@ -32,29 +32,49 @@ const STAGE_1B_RULE_HINT: TraceRuleHint = {
   title: 'Thứ tự ưu tiên Stage 1B (Bù giờ thiếu)',
   rules: [
     'Chọn ca: (1) Hiệu suất phủ cao nhất (efficiency) → (2) Bù nhiều giờ thiếu nhất (deltaCov) → (3) Áp lực khách cao nhất (pressure).',
-    'Chọn người: Best-Fit (đóng gói khít quỹ giờ) → Jain Index → ID. Việc san đều sẽ thực hiện ở Stage 2.',
+    'Chọn người: Ít ngày khả dụng nhất (MRV) → Best-Fit (đóng gói khít quỹ giờ) → Jain Index → ID. Việc san đều sẽ thực hiện ở Stage 2.',
   ],
 };
 import type { DayOfWeek } from './types';
 
-/** Selects best eligible staff for `(day, duration)` by Best-Fit slack, then Jain Index, then `staff.id`. */
+/** Counts available days (0-bits in the 7-bit `unavailableMask`) in O(1). */
+function countAvailableDays7(unavailableMask: number): number {
+  let x = ~unavailableMask & 0x7f;
+  x = x - ((x >> 1) & 0x55);
+  x = (x & 0x33) + ((x >> 2) & 0x33);
+  return (x + (x >> 4)) & 0x0f;
+}
+
+/**
+ * Selects best eligible staff for `(day, duration)` by:
+ * 1. Fewest configured available days (MRV — preserves flexible staff for scarce days),
+ * 2. Best-Fit slack (`maxH - nextH`),
+ * 3. Higher hypothetical Jain Index,
+ * 4. `staff.id` ASC (iteration order).
+ * When all staff have 7 available days (MVP baseline), criterion (1) ties identically.
+ */
 function pickBestFitStaff(
   state: SchedulerWorkingState,
   day: DayOfWeek,
   duration: number,
 ): number {
   const eligibleCount = state.eligibleStaff.length;
+  const dayBit = 1 << day;
   let bestIdx = -1;
+  let bestAvailDays = 8;
   let bestSlack = Number.POSITIVE_INFINITY;
   let bestJain = -1;
 
   for (let i = 0; i < eligibleCount; i++) {
     if (state.dayOccupied[i * 7 + day] !== 0) continue;
+    const unavailMask = state.unavailableMask[i]!;
+    if ((unavailMask & dayBit) !== 0) continue;
     const currH = state.assignedHours[i]!;
     const maxH = state.maxHours[i]!;
     const nextH = currH + duration;
     if (nextH > maxH) continue;
 
+    const availDays = countAvailableDays7(unavailMask);
     const slack = maxH - nextH;
     const oldU = currH / maxH;
     const newU = nextH / maxH;
@@ -66,10 +86,13 @@ function pickBestFitStaff(
 
     if (
       bestIdx === -1 ||
-      slack < bestSlack ||
-      (slack === bestSlack && hypJain - bestJain > JAIN_TIE_EPS)
+      availDays < bestAvailDays ||
+      (availDays === bestAvailDays &&
+        (slack < bestSlack ||
+          (slack === bestSlack && hypJain - bestJain > JAIN_TIE_EPS)))
     ) {
       bestIdx = i;
+      bestAvailDays = availDays;
       bestSlack = slack;
       bestJain = hypJain;
     }
@@ -170,7 +193,9 @@ function collectStage1TraceCandidates(
 
   for (const d of DAYS_OF_WEEK) {
     const dayOffset = d * 16;
+    const dayBit = 1 << d;
     for (let sIdx = 0; sIdx < state.sortedShifts.length; sIdx++) {
+      if ((state.shiftDayMask[sIdx]! & dayBit) === 0) continue;
       if (d === winnerDay && sIdx === winnerShiftIdx) continue;
       const shift = state.sortedShifts[sIdx]!;
       const duration = getShiftDuration(shift);
@@ -313,7 +338,9 @@ export function runStage1Coverage(
 
     for (const d of DAYS_OF_WEEK) {
       const dayOffset = d * 16;
+      const dayBit = 1 << d;
       for (let sIdx = 0; sIdx < state.sortedShifts.length; sIdx++) {
+        if ((state.shiftDayMask[sIdx]! & dayBit) === 0) continue;
         const shift = state.sortedShifts[sIdx]!;
         const duration = getShiftDuration(shift);
 
@@ -433,7 +460,9 @@ export function runStage1Coverage(
 
     for (const d of DAYS_OF_WEEK) {
       const dayOffset = d * 16;
+      const dayBit = 1 << d;
       for (let sIdx = 0; sIdx < state.sortedShifts.length; sIdx++) {
+        if ((state.shiftDayMask[sIdx]! & dayBit) === 0) continue;
         const shift = state.sortedShifts[sIdx]!;
         const duration = getShiftDuration(shift);
 

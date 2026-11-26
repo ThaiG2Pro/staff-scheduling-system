@@ -44,11 +44,12 @@ export function AssignmentChip({
 }: AssignmentChipProps) {
   const isOverlapping = Boolean(warningFlags?.isOverlapping);
   const isMultiShiftDay = Boolean(warningFlags?.isMultiShiftDay);
-  const hasLocalWarning = isOverlapping || isMultiShiftDay;
+  const isUnavailableDay = Boolean(warningFlags?.isUnavailableDay);
+  const hasShiftClashWarning = isOverlapping || isMultiShiftDay;
   const isOvertime = Boolean(warningFlags?.isOverMaxHours);
 
   const isCritical = isPinConflict || isOverlapping;
-  const isDayConflict = !isCritical && isMultiShiftDay;
+  const isDayConflict = !isCritical && (isMultiShiftDay || isUnavailableDay);
   const hasRow2Issue = isCritical || isDayConflict;
 
   const localWarningLabel = [
@@ -124,7 +125,7 @@ export function AssignmentChip({
             </span>
           )}
 
-          {hasLocalWarning && (
+          {hasShiftClashWarning && (
             <span
               title={localWarningLabel}
               aria-label={localWarningLabel}
@@ -141,6 +142,17 @@ export function AssignmentChip({
                 aria-hidden="true"
               />
               {isOverlapping ? 'Overlap' : '2+ shifts'}
+            </span>
+          )}
+
+          {isUnavailableDay && (
+            <span
+              title="Staff marked unavailable on this day"
+              aria-label="Staff unavailable on this day"
+              className="inline-flex items-center gap-0.5 rounded bg-amber-200/80 px-1.5 py-0.2 text-[10px] font-bold text-amber-950"
+            >
+              <AlertTriangle className="h-2.5 w-2.5 shrink-0 text-amber-800" aria-hidden="true" />
+              Day off
             </span>
           )}
 

@@ -6,7 +6,12 @@
 
 import { DAYS_OF_WEEK, MAX_SAFE_BIGINT } from './constants';
 import { safeBigIntToNumber } from './decimalMath';
-import { computeUnionAssignedHours, shiftsOverlap } from './hardRules';
+import {
+  computeUnionAssignedHours,
+  isStaffEligible,
+  isStaffUnavailableOnDay,
+  shiftsOverlap,
+} from './hardRules';
 import type {
   Assignment,
   AssignmentWarningFlags,
@@ -75,13 +80,14 @@ export function computeAllStaffMetrics(
     const remainingHours = s.maxWeeklyHours - assignedHours;
     const overtimeHours = Math.max(0, assignedHours - s.maxWeeklyHours);
     const isOverMaxHours = assignedHours > s.maxWeeklyHours;
-    const utilization = s.maxWeeklyHours > 0 ? assignedHours / s.maxWeeklyHours : null;
+    const eligible = isStaffEligible(s);
+    const utilization = eligible ? assignedHours / s.maxWeeklyHours : null;
 
     if (isOverMaxHours) {
       hourLimitWarningCount += 1;
     }
 
-    if (s.maxWeeklyHours > 0 && remainingHours > 0) {
+    if (eligible && remainingHours > 0) {
       unusedCapacityBigInt += BigInt(remainingHours);
       if (unusedCapacityBigInt > MAX_SAFE_BIGINT) {
         return {
@@ -139,6 +145,7 @@ export function computeAllStaffMetrics(
         isOverMaxHours,
         isMultiShiftDay: multiShiftDaySet.has(a.day),
         isOverlapping: overlappingSet.has(a.id),
+        isUnavailableDay: isStaffUnavailableOnDay(s, a.day),
       };
     }
   }
@@ -184,7 +191,7 @@ export function computeFairnessJainIndex(
   staff: readonly Readonly<Staff>[],
   staffMetrics: Readonly<Record<string, StaffMetrics>>,
 ): { jainIndex: number | null; eligibleStaffCount: number; isSingleEligibleStaff: boolean } {
-  const eligible = staff.filter((s) => s.maxWeeklyHours > 0);
+  const eligible = staff.filter(isStaffEligible);
   const eligibleStaffCount = eligible.length;
 
   if (eligibleStaffCount === 0) {

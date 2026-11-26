@@ -57,6 +57,7 @@ import {
   deleteStaff,
   previewDeleteShiftInSchedule,
   previewDeleteStaffInSchedule,
+  previewDisableShiftDaysInSchedule,
   previewEditShiftInSchedule,
   reorderShiftTemplates,
   updateShiftTemplate,
@@ -87,13 +88,32 @@ export interface ScheduleStore {
   deleteSchedule: (scheduleId: string) => StateActionResult;
   setActiveSchedule: (scheduleId: string | null) => StateActionResult;
   setTargetTxnsPerStaffHour: (scheduleId: string, targetN: number) => StateActionResult;
-  addStaff: (scheduleId: string, input: { name: string; maxWeeklyHours: number }) => StateActionResult<{ staffId: string }>;
-  updateStaff: (scheduleId: string, staffId: string, input: { name: string; maxWeeklyHours: number }) => StateActionResult;
+  addStaff: (
+    scheduleId: string,
+    input: { name: string; maxWeeklyHours: number; unavailableDays?: DayOfWeek[] },
+  ) => StateActionResult<{ staffId: string }>;
+  updateStaff: (
+    scheduleId: string,
+    staffId: string,
+    input: { name: string; maxWeeklyHours: number; unavailableDays?: DayOfWeek[] },
+  ) => StateActionResult;
   previewDeleteStaff: (scheduleId: string, staffId: string) => DeletePreview;
   deleteStaff: (scheduleId: string, staffId: string) => StateActionResult<{ removedAssignmentsCount: number }>;
-  addShiftTemplate: (scheduleId: string, input: { startHour: number; endHour: number }) => StateActionResult<{ shiftId: string }>;
+  addShiftTemplate: (
+    scheduleId: string,
+    input: { startHour: number; endHour: number; daysOfWeek?: DayOfWeek[] },
+  ) => StateActionResult<{ shiftId: string }>;
   previewEditShift: (scheduleId: string, shiftId: string) => DeletePreview;
-  updateShiftTemplate: (scheduleId: string, shiftId: string, input: { startHour: number; endHour: number }) => StateActionResult;
+  previewDisableShiftDays: (
+    scheduleId: string,
+    shiftId: string,
+    nextDaysOfWeek: readonly DayOfWeek[],
+  ) => DeletePreview;
+  updateShiftTemplate: (
+    scheduleId: string,
+    shiftId: string,
+    input: { startHour: number; endHour: number; daysOfWeek?: DayOfWeek[] },
+  ) => StateActionResult<{ removedAssignmentsCount: number }>;
   previewDeleteShift: (scheduleId: string, shiftId: string) => DeletePreview;
   deleteShiftTemplate: (scheduleId: string, shiftId: string) => StateActionResult<{ removedAssignmentsCount: number }>;
   reorderShiftTemplates: (scheduleId: string, orderedShiftIds: readonly string[]) => StateActionResult;
@@ -267,6 +287,8 @@ export function useScheduleStore(
       runWritable((cur) => addShiftTemplate(cur, scheduleId, input, deps), () => scheduleId),
     previewEditShift: (scheduleId, shiftId) =>
       previewEditShiftInSchedule(persistedRef.current, scheduleId, shiftId),
+    previewDisableShiftDays: (scheduleId, shiftId, nextDaysOfWeek) =>
+      previewDisableShiftDaysInSchedule(persistedRef.current, scheduleId, shiftId, nextDaysOfWeek),
     updateShiftTemplate: (scheduleId, shiftId, input) =>
       runWritable((cur) => updateShiftTemplate(cur, scheduleId, shiftId, input, deps), () => scheduleId),
     previewDeleteShift: (scheduleId, shiftId) =>

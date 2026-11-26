@@ -4,6 +4,7 @@
  * and no-op preservation of `Schedule.updatedAt`.
  */
 
+import { isShiftActiveOnDay } from '../domain/hardRules';
 import type { Assignment, DayOfWeek, Schedule } from '../domain/types';
 import type { PersistedAppState } from '../persistence/storageTypes';
 import { DEFAULT_ACTION_DEPS, type ActionDeps, type StateActionResult } from './actionTypes';
@@ -38,8 +39,12 @@ export function assignStaffToShift(
   if (!schedule.staff.some((st) => st.id === input.staffId)) {
     return { ok: false, error: 'Staff member not found in schedule.' };
   }
-  if (!schedule.shifts.some((sh) => sh.id === input.shiftId)) {
+  const shift = schedule.shifts.find((sh) => sh.id === input.shiftId);
+  if (!shift) {
     return { ok: false, error: 'Shift template not found in schedule.' };
+  }
+  if (!isShiftActiveOnDay(shift, input.day)) {
+    return { ok: false, error: 'Shift template is not active on this day.' };
   }
   const duplicate = schedule.assignments.some(
     (a) => a.day === input.day && a.shiftId === input.shiftId && a.staffId === input.staffId,
@@ -196,9 +201,13 @@ export function restoreAssignmentsSnapshot(
   if (!schedule) return { ok: false, error: 'Schedule not found.' };
 
   const validStaffIds = new Set(schedule.staff.map((st) => st.id));
-  const validShiftIds = new Set(schedule.shifts.map((sh) => sh.id));
+  const shiftById = new Map(schedule.shifts.map((sh) => [sh.id, sh]));
   const restored = snapshot
-    .filter((a) => validStaffIds.has(a.staffId) && validShiftIds.has(a.shiftId))
+    .filter((a) => {
+      if (!validStaffIds.has(a.staffId)) return false;
+      const shift = shiftById.get(a.shiftId);
+      return shift !== undefined && isShiftActiveOnDay(shift, a.day);
+    })
     .map((a) => ({ ...a }));
 
   const updated: Schedule = {

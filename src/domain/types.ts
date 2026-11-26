@@ -30,12 +30,16 @@ export interface Staff {
   id: string;
   name: string;
   maxWeeklyHours: number;
+  /** Optional sorted unique days (0=Mon..6=Sun) when staff is unavailable. Undefined means available all 7 days. */
+  unavailableDays?: DayOfWeek[];
 }
 
 export interface ShiftTemplate {
   id: string;
   startHour: number;
   endHour: number;
+  /** Optional sorted unique active days (0=Mon..6=Sun). Undefined means active all 7 days `[0..6]`. */
+  daysOfWeek?: DayOfWeek[];
 }
 
 export interface Assignment {
@@ -88,7 +92,8 @@ export type MissingInputCode = 'DEMAND' | 'SHIFTS' | 'ELIGIBLE_STAFF' | 'INVALID
 export type PinConflictType =
   | 'OVER_MAX_HOURS'
   | 'MULTIPLE_SHIFTS_SAME_DAY'
-  | 'OVERLAPPING_SHIFTS';
+  | 'OVERLAPPING_SHIFTS'
+  | 'UNAVAILABLE_DAY';
 
 export interface PinConflict {
   staffId: string;
@@ -176,12 +181,14 @@ export interface AssignmentWarningFlags {
   isOverMaxHours: boolean;
   isMultiShiftDay: boolean;
   isOverlapping: boolean;
+  isUnavailableDay: boolean;
 }
 
 export type AssignmentGuidanceReasonCode =
   | 'WOULD_EXCEED_MAX_HOURS'
   | 'ALREADY_HAS_SHIFT_ON_DAY'
-  | 'WOULD_OVERLAP_SHIFT';
+  | 'WOULD_OVERLAP_SHIFT'
+  | 'STAFF_UNAVAILABLE_ON_DAY';
 
 export interface AssignmentGuidanceReason {
   code: AssignmentGuidanceReasonCode;
