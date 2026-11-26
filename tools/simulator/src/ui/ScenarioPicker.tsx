@@ -14,6 +14,7 @@ interface ScenarioPickerProps {
 function getBadgeClass(badge: string): string {
   if (badge === 'Happy Path') return 'bg-emerald-100 text-emerald-800';
   if (badge === 'Stage 2') return 'bg-indigo-100 text-indigo-800';
+  if (badge.startsWith('Phase 2')) return 'bg-sky-100 text-sky-800';
   if (badge.startsWith('Stress')) return 'bg-violet-100 text-violet-800';
   if (badge === 'Pinned') return 'bg-amber-100 text-amber-800';
   return 'bg-rose-100 text-rose-800';
@@ -25,12 +26,16 @@ const GROUPS: readonly { readonly title: string; readonly ids: readonly Scenario
     ids: ['demo_store', 'demo_stage2_rebalance', 'demo_with_pins'],
   },
   {
+    title: 'Phase 2 · Ngày ca & Ngày nghỉ (MRV)',
+    ids: ['phase2_mrv_availability', 'phase2_shift_active_days'],
+  },
+  {
     title: 'Stress-Test thuật toán (Phức tạp)',
     ids: ['complex_mixed_shifts_swap', 'complex_uncoverable_gap', 'complex_heavy_25_staff'],
   },
   {
     title: 'Kịch bản lỗi & Bảo vệ dữ liệu',
-    ids: ['pin_conflict_e03', 'storage_corrupt_lock'],
+    ids: ['pin_conflict_e03', 'pin_conflict_unavailable', 'storage_corrupt_lock'],
   },
 ];
 

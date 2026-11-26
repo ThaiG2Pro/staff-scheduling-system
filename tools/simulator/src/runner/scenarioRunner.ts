@@ -15,6 +15,8 @@ import {
   buildComplexFlagship25StaffFixture,
   buildComplexMixedShiftsFixture,
   buildComplexUncoverableGapFixture,
+  buildPhase2MrvAvailabilityFixture,
+  buildPhase2ShiftActiveDaysFixture,
   type ComplexFixture,
 } from './complexFixtures';
 import type { ScenarioPresetId } from './scenarioPresets';
@@ -109,19 +111,24 @@ export function runSimulationScenario(params: RunScenarioParams): TraceRun {
 
   // --- Seed initial Schedule & persist into Sandbox Storage ---
   const complexFixture: ComplexFixture | null =
-    params.presetId === 'complex_mixed_shifts_swap'
-      ? buildComplexMixedShiftsFixture()
-      : params.presetId === 'complex_uncoverable_gap'
-        ? buildComplexUncoverableGapFixture()
-        : params.presetId === 'complex_heavy_25_staff'
-          ? buildComplexFlagship25StaffFixture()
-          : null;
+    params.presetId === 'phase2_mrv_availability'
+      ? buildPhase2MrvAvailabilityFixture()
+      : params.presetId === 'phase2_shift_active_days'
+        ? buildPhase2ShiftActiveDaysFixture()
+        : params.presetId === 'complex_mixed_shifts_swap'
+          ? buildComplexMixedShiftsFixture()
+          : params.presetId === 'complex_uncoverable_gap'
+            ? buildComplexUncoverableGapFixture()
+            : params.presetId === 'complex_heavy_25_staff'
+              ? buildComplexFlagship25StaffFixture()
+              : null;
 
   const baseSchedule: Schedule = createDemoStoreSchedule({
     nowIso,
     generateId: makeDeterministicIdGen('seed'),
   });
 
+  let scheduleStaff = complexFixture ? complexFixture.staff.slice() : baseSchedule.staff;
   let pinnedAssignments: Assignment[] = [];
   if (complexFixture) {
     pinnedAssignments = complexFixture.pinnedAssignments.slice();
@@ -142,12 +149,21 @@ export function runSimulationScenario(params: RunScenarioParams): TraceRun {
       { id: 'pin-conflict-1', day: 0, shiftId: sh0.id, staffId: s0.id, isPinned: true },
       { id: 'pin-conflict-2', day: 0, shiftId: sh1.id, staffId: s0.id, isPinned: true },
     ];
+  } else if (params.presetId === 'pin_conflict_unavailable') {
+    const s0 = baseSchedule.staff[0]!;
+    const sh0 = baseSchedule.shifts[0]!;
+    scheduleStaff = baseSchedule.staff.map((st, idx) =>
+      idx === 0 ? { ...st, unavailableDays: [0] } : st,
+    );
+    pinnedAssignments = [
+      { id: 'pin-unavail-mon', day: 0, shiftId: sh0.id, staffId: s0.id, isPinned: true },
+    ];
   }
 
   const initialSchedule: Schedule = {
     ...baseSchedule,
     name: complexFixture ? complexFixture.label : baseSchedule.name,
-    staff: complexFixture ? complexFixture.staff.slice() : baseSchedule.staff,
+    staff: scheduleStaff,
     shifts: complexFixture ? complexFixture.shifts.slice() : baseSchedule.shifts,
     targetTxnsPerStaffHour: params.targetN,
     assignments: pinnedAssignments,

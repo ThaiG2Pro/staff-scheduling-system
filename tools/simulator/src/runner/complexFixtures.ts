@@ -192,3 +192,113 @@ export function buildComplexFlagship25StaffFixture(): ComplexFixture {
     pinnedAssignments,
   };
 }
+
+/**
+ * Phase 2 Case A: Staff Availability & Stage 1 MRV Priority.
+ * Mixes weekend-only (2/7d), midweek-off (5/7d), weekday-only (5/7d), full-week (7/7d),
+ * and an all-week-unavailable staff (0/7d, excluded by `isStaffEligible`).
+ */
+export function buildPhase2MrvAvailabilityFixture(): ComplexFixture {
+  const csvText = [
+    '"Aug 10, 2026 - Aug 16, 2026"',
+    ',"Mon, 10 Aug","Tue, 11 Aug","Wed, 12 Aug","Thu, 13 Aug","Fri, 14 Aug","Sat, 15 Aug","Sun, 16 Aug"',
+    '7am,16,16,18,18,22,34,30',
+    '8am,28,28,30,30,36,52,48',
+    '9am,36,36,38,38,44,64,58',
+    '10am,40,40,42,42,48,72,64',
+    '11am,54,54,56,56,64,86,78',
+    '12pm,64,62,66,66,76,96,88',
+    '1pm,58,56,60,60,70,88,80',
+    '2pm,32,30,34,34,42,60,54',
+    '3pm,24,24,26,26,34,52,46',
+    '4pm,26,26,28,28,38,56,48',
+    '5pm,44,44,46,46,58,76,68',
+    '6pm,56,54,58,58,72,88,78',
+    '7pm,60,58,62,62,76,92,82',
+    '8pm,46,44,48,48,60,76,66',
+    '9pm,24,22,26,26,38,52,42',
+    '10pm,10,10,12,12,20,30,22',
+  ].join('\n');
+
+  const shifts: ShiftTemplate[] = [
+    { id: 'mrv-morn', startHour: 7, endHour: 13 },  // 6h
+    { id: 'mrv-aft', startHour: 13, endHour: 19 },  // 6h
+    { id: 'mrv-eve', startHour: 17, endHour: 23 },  // 6h
+  ];
+
+  const staff: Staff[] = [
+    { id: 'mrv-01', name: 'An (Chỉ T7–CN)', maxWeeklyHours: 12, unavailableDays: [0, 1, 2, 3, 4] },
+    { id: 'mrv-02', name: 'Bình (Chỉ T6–CN)', maxWeeklyHours: 18, unavailableDays: [0, 1, 2, 3] },
+    { id: 'mrv-03', name: 'Châu (Nghỉ T3, T5)', maxWeeklyHours: 30, unavailableDays: [1, 3] },
+    { id: 'mrv-04', name: 'Dũng (Nghỉ T7, CN)', maxWeeklyHours: 30, unavailableDays: [5, 6] },
+    { id: 'mrv-05', name: 'Em (Nghỉ T2, T4)', maxWeeklyHours: 24, unavailableDays: [0, 2] },
+    { id: 'mrv-06', name: 'Giang (Full 7 ngày)', maxWeeklyHours: 36 },
+    { id: 'mrv-07', name: 'Hà (Full 7 ngày)', maxWeeklyHours: 36 },
+    { id: 'mrv-08', name: 'Khánh (Nghỉ cả tuần)', maxWeeklyHours: 24, unavailableDays: [0, 1, 2, 3, 4, 5, 6] },
+  ];
+
+  return {
+    label: 'Phase 2 · MRV & Ngày nghỉ nhân viên (Availability)',
+    csvFileName: 'phase2_mrv_availability.csv',
+    csvText,
+    staff,
+    shifts,
+    pinnedAssignments: [],
+  };
+}
+
+/**
+ * Phase 2 Case B: Shift Active Days (`daysOfWeek`).
+ * Weekday shifts run Mon–Fri only; Weekend Booster runs Sat–Sun only; Late shift runs Thu–Sun only
+ * (leaving Mon–Wed 19:00–23:00 structurally uncoverable per-cell).
+ */
+export function buildPhase2ShiftActiveDaysFixture(): ComplexFixture {
+  const csvText = [
+    '"Aug 10, 2026 - Aug 16, 2026"',
+    ',"Mon, 10 Aug","Tue, 11 Aug","Wed, 12 Aug","Thu, 13 Aug","Fri, 14 Aug","Sat, 15 Aug","Sun, 16 Aug"',
+    '7am,18,18,18,20,24,36,32',
+    '8am,32,32,34,36,42,58,52',
+    '9am,40,40,42,44,50,70,64',
+    '10am,44,44,46,48,54,78,70',
+    '11am,58,58,60,62,70,92,84',
+    '12pm,68,66,70,72,82,104,94',
+    '1pm,60,58,62,64,74,94,86',
+    '2pm,34,32,36,38,46,66,60',
+    '3pm,26,24,28,30,38,58,52',
+    '4pm,28,26,30,34,44,64,56',
+    '5pm,46,44,48,52,64,84,74',
+    '6pm,56,54,58,64,78,96,86',
+    '7pm,42,40,44,68,82,102,90',
+    '8pm,34,32,36,56,70,88,76',
+    '9pm,18,16,20,38,50,62,48',
+    '10pm,10,10,12,22,30,38,26',
+  ].join('\n');
+
+  const shifts: ShiftTemplate[] = [
+    { id: 'sd-wkday-morn', startHour: 7, endHour: 13, daysOfWeek: [0, 1, 2, 3, 4] },    // T2–T6
+    { id: 'sd-wkday-aft', startHour: 13, endHour: 19, daysOfWeek: [0, 1, 2, 3, 4] },    // T2–T6
+    { id: 'sd-wknd-full', startHour: 7, endHour: 15, daysOfWeek: [5, 6] },              // Chỉ T7–CN
+    { id: 'sd-wknd-aft', startHour: 13, endHour: 19, daysOfWeek: [5, 6] },              // Chỉ T7–CN
+    { id: 'sd-late-thu-sun', startHour: 17, endHour: 23, daysOfWeek: [3, 4, 5, 6] },    // Chỉ T5–CN
+  ];
+
+  const staff: Staff[] = [
+    { id: 'sd-01', name: 'An', maxWeeklyHours: 36 },
+    { id: 'sd-02', name: 'Bình', maxWeeklyHours: 36 },
+    { id: 'sd-03', name: 'Châu', maxWeeklyHours: 30 },
+    { id: 'sd-04', name: 'Dũng', maxWeeklyHours: 30 },
+    { id: 'sd-05', name: 'Em', maxWeeklyHours: 24 },
+    { id: 'sd-06', name: 'Giang', maxWeeklyHours: 24, unavailableDays: [0, 1] },
+    { id: 'sd-07', name: 'Hà', maxWeeklyHours: 24, unavailableDays: [2, 3] },
+    { id: 'sd-08', name: 'Khánh', maxWeeklyHours: 16, unavailableDays: [0, 1, 2, 3, 4] },
+  ];
+
+  return {
+    label: 'Phase 2 · Ca hoạt động theo thứ (Shift Active Days)',
+    csvFileName: 'phase2_shift_active_days.csv',
+    csvText,
+    staff,
+    shifts,
+    pinnedAssignments: [],
+  };
+}

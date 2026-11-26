@@ -1,5 +1,7 @@
 import type { TraceEntitySnapshot } from '../../../../src/domain/schedulerTrace';
 
+const DAY_SHORT_VI = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'] as const;
+
 interface StaffBarsProps {
   readonly entities: readonly TraceEntitySnapshot[] | null;
 }
@@ -31,9 +33,19 @@ export function StaffBars({ entities }: StaffBarsProps) {
                 }`}
               >
                 <div className="mb-1 flex items-center justify-between gap-1 text-[11px]">
-                  <span className="truncate font-semibold text-slate-800" title={e.name}>
-                    {e.name}
-                  </span>
+                  <div className="flex min-w-0 items-center gap-1">
+                    <span className="truncate font-semibold text-slate-800" title={e.name}>
+                      {e.name}
+                    </span>
+                    {e.availableDaysCount !== undefined && e.availableDaysCount < 7 && (
+                      <span
+                        title={`Nghỉ: ${(e.unavailableDays ?? []).map((d) => DAY_SHORT_VI[d]).join(', ')} (MRV: ${e.availableDaysCount}/7 ngày)`}
+                        className="shrink-0 rounded bg-amber-50 px-1 py-0.2 font-mono text-[9px] font-semibold text-amber-800 ring-1 ring-amber-200"
+                      >
+                        {e.availableDaysCount}/7d
+                      </span>
+                    )}
+                  </div>
                   <span className="shrink-0 font-mono text-[10px] text-slate-600">
                     <strong>{e.assignedHours}</strong>/{e.maxHours}h
                   </span>

@@ -61,6 +61,8 @@ export interface TraceEntitySnapshot {
   readonly maxHours: number;
   readonly utilization: number;
   readonly isChanged?: boolean;
+  readonly unavailableDays?: readonly DayOfWeek[];
+  readonly availableDaysCount?: number;
   readonly extra?: Readonly<Record<string, number | string>>;
 }
 
@@ -245,6 +247,16 @@ export function snapshotTraceEntities(
     const s = state.eligibleStaff[i]!;
     const assigned = state.assignedHours[i]!;
     const maxH = state.maxHours[i]!;
+    const unavailMask = state.unavailableMask[i]!;
+    let unavailableDays: DayOfWeek[] | undefined;
+    if (unavailMask !== 0) {
+      unavailableDays = [];
+      for (let d = 0; d < 7; d++) {
+        if ((unavailMask & (1 << d)) !== 0) {
+          unavailableDays.push(d as DayOfWeek);
+        }
+      }
+    }
     entities.push({
       id: s.id,
       name: s.name,
@@ -252,6 +264,9 @@ export function snapshotTraceEntities(
       maxHours: maxH,
       utilization: maxH > 0 ? Math.round((assigned / maxH) * 1000) / 1000 : 0,
       ...(changedSet?.has(i) ? { isChanged: true } : {}),
+      ...(unavailableDays
+        ? { unavailableDays, availableDaysCount: 7 - unavailableDays.length }
+        : {}),
     });
   }
   return entities;

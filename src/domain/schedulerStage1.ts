@@ -158,6 +158,11 @@ function collectStage1TraceCandidates(
   const winnerStaff = state.eligibleStaff[winnerStaffIdx]!;
   const winnerDur = getShiftDuration(winnerShift);
   const winnerSlack = state.maxHours[winnerStaffIdx]! - (state.assignedHours[winnerStaffIdx]! + winnerDur);
+  const winnerAvailDays = countAvailableDays7(state.unavailableMask[winnerStaffIdx]!);
+  const winnerStaffWhy =
+    winnerAvailDays < 7
+      ? `ưu tiên MRV (${winnerAvailDays}/7 ngày khả dụng) → Best-Fit còn dư ${winnerSlack}h`
+      : `Best-Fit còn dư ${winnerSlack}h (đóng gói khít quỹ giờ)`;
 
   rows.push({
     id: `win-${winnerDay}-${winnerShift.id}-${winnerStaff.id}`,
@@ -165,13 +170,14 @@ function collectStage1TraceCandidates(
     status: 'WINNER',
     reason:
       phase === '1A'
-        ? `Lấp ${winnerDeltaGaps} ô trống người, hiệu suất ${(winnerEfficiency * 100).toFixed(0)}%, slack ${winnerSlack}h`
-        : `Hiệu suất phủ ${(winnerEfficiency * 100).toFixed(0)}% (+${winnerDeltaCov}h), slack ${winnerSlack}h`,
+        ? `Lấp ${winnerDeltaGaps} ô trống người, hiệu suất ${(winnerEfficiency * 100).toFixed(0)}%. Chọn ${winnerStaff.name} vì ${winnerStaffWhy}.`
+        : `Hiệu suất phủ ${(winnerEfficiency * 100).toFixed(0)}% (+${winnerDeltaCov}h). Chọn ${winnerStaff.name} vì ${winnerStaffWhy}.`,
     scores: {
       ...(phase === '1A' ? { deltaGaps: winnerDeltaGaps } : {}),
       deltaCov: winnerDeltaCov,
       efficiency: Number(winnerEfficiency.toFixed(3)),
       pressure: Number(winnerPressure.toFixed(1)),
+      availDays: winnerAvailDays,
       slack: winnerSlack,
     },
   });
@@ -185,6 +191,7 @@ function collectStage1TraceCandidates(
     readonly deltaCov: number;
     readonly efficiency: number;
     readonly pressure: number;
+    readonly availDays: number;
     readonly slack: number;
   }
 
@@ -225,7 +232,7 @@ function collectStage1TraceCandidates(
             id: `rej-${d}-${shift.id}`,
             label: `${formatTraceDay(d)} · ${formatTraceShift(shift)}`,
             status: 'REJECTED',
-            reason: 'Không còn nhân viên hợp lệ (đều đã có ca trong ngày hoặc vượt maxWeeklyHours)',
+            reason: 'Không còn nhân viên hợp lệ (đã có ca trong ngày, đánh dấu nghỉ, hoặc vượt maxWeeklyHours)',
             scores: {
               ...(phase === '1A' ? { deltaGaps } : {}),
               deltaCov,
@@ -236,8 +243,9 @@ function collectStage1TraceCandidates(
         }
       } else {
         const staff = state.eligibleStaff[chosenStaff]!;
+        const availDays = countAvailableDays7(state.unavailableMask[chosenStaff]!);
         const slack = state.maxHours[chosenStaff]! - (state.assignedHours[chosenStaff]! + duration);
-        allRunnerUps.push({ d, shift, staff, deltaGaps, deltaCov, efficiency, pressure, slack });
+        allRunnerUps.push({ d, shift, staff, deltaGaps, deltaCov, efficiency, pressure, availDays, slack });
       }
     }
   }
@@ -271,7 +279,7 @@ function collectStage1TraceCandidates(
     }
     rows[0] = {
       ...rows[0],
-      reason: `${winWhy}. Chọn ${winnerStaff.name} vì Best-Fit còn dư ${winnerSlack}h (đóng gói khít quỹ giờ).`,
+      reason: `${winWhy}. Chọn ${winnerStaff.name} vì ${winnerStaffWhy}.`,
     };
   }
 
@@ -296,6 +304,7 @@ function collectStage1TraceCandidates(
         deltaCov: r.deltaCov,
         efficiency: Number(r.efficiency.toFixed(3)),
         pressure: Number(r.pressure.toFixed(1)),
+        availDays: r.availDays,
         slack: r.slack,
       },
     });

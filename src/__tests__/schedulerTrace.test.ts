@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { runAutoSchedule } from '../domain/autoScheduler';
 import { createDemoStoreSchedule } from '../domain/demoData';
 import type { SchedulerTraceObserver, TraceEvent } from '../domain/schedulerTrace';
-import type { AutoScheduleInput } from '../domain/types';
+import type { AutoScheduleInput, DayOfWeek } from '../domain/types';
 
 function makeDeterministicIdGen(prefix: string): () => string {
   let seq = 0;
@@ -92,5 +92,42 @@ describe('Scheduler Trace Protocol — Determinism & Non-Interference Invariant'
     expect(traced.status).toBe('FAILED');
     expect(events).toHaveLength(1);
     expect(events[0]!.status).toBe('error');
+  });
+
+  it('traces MRV availDays and unavailableDays snapshots identically with Phase 2 inputs', () => {
+    const base = buildDemoInput();
+    const wkdays: DayOfWeek[] = [0, 1, 2, 3, 4];
+    const staffWithUnavail = base.staff.map((s, idx) =>
+      idx === 0 ? { ...s, unavailableDays: wkdays.slice() } : s,
+    );
+    const shiftsWithDays = base.shifts.map((sh, idx) =>
+      idx === 0 ? { ...sh, daysOfWeek: wkdays.slice() } : sh,
+    );
+
+    const inputWithPhase2: Partial<AutoScheduleInput> = {
+      staff: staffWithUnavail,
+      shifts: shiftsWithDays,
+    };
+
+    const events: Omit<TraceEvent, 'seq'>[] = [];
+    const observer: SchedulerTraceObserver = { emit: (e) => events.push(e) };
+
+    const baseline = runAutoSchedule(buildDemoInput(inputWithPhase2));
+    const traced = runAutoSchedule(buildDemoInput(inputWithPhase2), { observer });
+
+    expect(traced).toEqual(baseline);
+    expect(traced.status).toBe('SUCCESS');
+
+    const stage1Steps = events.filter((e) => e.stageId.startsWith('stage_1') && e.kind === 'loop_step');
+    expect(stage1Steps.length).toBeGreaterThan(0);
+
+    // Every Stage 1 winner candidate includes availDays score
+    const winner = stage1Steps[0]!.candidates?.find((c) => c.status === 'WINNER');
+    expect(winner?.scores.availDays).toBeTypeOf('number');
+
+    // Entity snapshot preserves unavailableDays & availableDaysCount for constrained staff
+    const constrainedEntity = stage1Steps[0]!.entities?.find((e) => e.id === staffWithUnavail[0]!.id);
+    expect(constrainedEntity?.availableDaysCount).toBe(2);
+    expect(constrainedEntity?.unavailableDays).toEqual([0, 1, 2, 3, 4]);
   });
 });

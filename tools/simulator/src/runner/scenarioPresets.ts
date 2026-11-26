@@ -1,11 +1,14 @@
 export type ScenarioPresetId =
   | 'demo_store'
   | 'demo_stage2_rebalance'
+  | 'phase2_mrv_availability'
+  | 'phase2_shift_active_days'
   | 'complex_mixed_shifts_swap'
   | 'complex_uncoverable_gap'
   | 'complex_heavy_25_staff'
   | 'demo_with_pins'
   | 'pin_conflict_e03'
+  | 'pin_conflict_unavailable'
   | 'storage_corrupt_lock';
 
 export interface ScenarioPreset {
@@ -30,6 +33,20 @@ export const SCENARIO_PRESETS: readonly ScenarioPreset[] = [
     shortDescription: 'Stage 1 đóng gói Best-Fit làm lệch tải → Stage 2 chạy hàng loạt REASSIGN kéo Jain Index lên tối đa.',
     badge: 'Stage 2',
     defaultTargetN: 28,
+  },
+  {
+    id: 'phase2_mrv_availability',
+    name: 'Phase 2 · MRV & Ngày nghỉ nhân viên (Availability)',
+    shortDescription: 'Mix NV chỉ làm T7–CN (2/7d), nghỉ giữa tuần (5/7d), full-week và nghỉ cả tuần (0/7d). Xem Stage 1 ưu tiên MRV và tô ô OFF.',
+    badge: 'Phase 2 · MRV',
+    defaultTargetN: 22,
+  },
+  {
+    id: 'phase2_shift_active_days',
+    name: 'Phase 2 · Ca hoạt động theo thứ (Shift Active Days)',
+    shortDescription: 'Ca thường chỉ chạy T2–T6, ca cuối tuần chỉ T7–CN, ca tối chỉ T5–CN → kiểm tra lọc ngày hoạt động & uncoverable theo từng ô.',
+    badge: 'Phase 2 · Days',
+    defaultTargetN: 22,
   },
   {
     id: 'complex_mixed_shifts_swap',
@@ -64,6 +81,13 @@ export const SCENARIO_PRESETS: readonly ScenarioPreset[] = [
     name: 'Kịch bản lỗi: Xung đột ca ghim (E-03)',
     shortDescription: '1 nhân viên bị ghim 2 ca cùng ngày → Pin Conflict Gate chặn ngay và giữ nguyên lịch cũ.',
     badge: 'Lỗi E-03',
+    defaultTargetN: 15,
+  },
+  {
+    id: 'pin_conflict_unavailable',
+    name: 'Kịch bản lỗi: Ca ghim trùng ngày nghỉ (UNAVAILABLE_DAY)',
+    shortDescription: 'Nhân viên đánh dấu nghỉ Thứ 2 nhưng bị ghim ca Thứ 2 → Pin Conflict Gate chặn với mã UNAVAILABLE_DAY.',
+    badge: 'Lỗi OFF-Pin',
     defaultTargetN: 15,
   },
   {

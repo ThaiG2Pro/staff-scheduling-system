@@ -42,6 +42,10 @@ export function RosterTable({
     removedByStaffDay.set(key, list);
   }
 
+  const hasAnyUnavailable = entities.some(
+    (s) => s.unavailableDays !== undefined && s.unavailableDays.length > 0,
+  );
+
   return (
     <div className="space-y-2.5">
       <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600">
@@ -57,6 +61,11 @@ export function RosterTable({
           <span className="rounded bg-violet-100 px-1.5 py-0.5 text-violet-900 ring-1 ring-violet-400">
             🔄 Vừa nhận/đổi
           </span>
+          {hasAnyUnavailable && (
+            <span className="rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-slate-500">
+              ⛔ Nghỉ (OFF)
+            </span>
+          )}
         </div>
       </div>
 
@@ -76,20 +85,44 @@ export function RosterTable({
           <tbody className="divide-y divide-slate-100">
             {entities.map((staff) => {
               const pct = Math.round(staff.utilization * 100);
+              const unavailSet = staff.unavailableDays ? new Set<number>(staff.unavailableDays) : null;
               return (
                 <tr key={staff.id} className={staff.isChanged ? 'bg-indigo-50/40' : 'hover:bg-slate-50/60'}>
                   <td className="whitespace-nowrap px-2.5 py-2 font-semibold text-slate-800">
-                    {staff.name}
+                    <div className="flex items-center gap-1.5">
+                      <span>{staff.name}</span>
+                      {staff.availableDaysCount !== undefined && staff.availableDaysCount < 7 && (
+                        <span
+                          title={`Khả dụng ${staff.availableDaysCount}/7 ngày (MRV priority)`}
+                          className="rounded bg-amber-50 px-1 py-0.5 font-mono text-[10px] font-semibold text-amber-800 ring-1 ring-amber-200"
+                        >
+                          {staff.availableDaysCount}/7d
+                        </span>
+                      )}
+                    </div>
                   </td>
-                  {DAYS.map((_, d) => {
+                  {DAYS.map((dayLabel, d) => {
                     const key = `${staff.id}:${d}`;
                     const cellItems = byStaffDay.get(key) ?? [];
                     const removedItems = removedByStaffDay.get(key) ?? [];
                     const isEmpty = cellItems.length === 0 && removedItems.length === 0;
+                    const isOff = unavailSet?.has(d) ?? false;
                     return (
-                      <td key={d} className="px-1.5 py-1.5 text-center">
+                      <td
+                        key={d}
+                        className={`px-1.5 py-1.5 text-center ${
+                          isOff ? 'bg-slate-100/80' : ''
+                        }`}
+                        title={isOff ? `${staff.name} đánh dấu nghỉ ${dayLabel}` : undefined}
+                      >
                         {isEmpty ? (
-                          <span className="text-slate-300">—</span>
+                          isOff ? (
+                            <span className="inline-block rounded border border-slate-200 bg-white/80 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-400">
+                              OFF
+                            </span>
+                          ) : (
+                            <span className="text-slate-300">—</span>
+                          )
                         ) : (
                           <div className="flex flex-col items-center gap-1">
                             {removedItems.map((rem, idx) => (
