@@ -1,0 +1,14 @@
+# Tasks for shift-days-and-staff-availability
+
+- [x] **T1**: Extend pure domain types and hard-rule predicates/bitmasks/2D cellCoverable (`src/domain/types.ts,src/domain/hardRules.ts`)
+- [x] **T2**: Update constraint gates (checkPinConflicts UNAVAILABLE_DAY, evaluateStaffGuidance, previewDisableShiftDays, validateCandidateAssignments) (`src/domain/constraints.ts`)
+- [x] **T3**: Upgrade solver working state bitmasks (shiftDayMask, unavailableMask), eligibleStaff filter, Stage 1 skips, and Stage 2 unavailableMask rebalance (`src/domain/schedulerState.ts,src/domain/autoScheduler.ts,src/domain/schedulerStage1.ts,src/domain/schedulerStage2.ts`)
+- [x] **T4**: Upgrade derived metrics & diagnostics to 2D cellCoverable (7x16), unified isStaffEligible, and isUnavailableDay warnings (`src/domain/staffMetrics.ts,src/domain/derivedMetrics.ts,src/domain/schedulerDiagnostics.ts`)
+- [x] **T5**: Add Domain, Solver & Metrics unit tests for Phase 2 rules, bitmasks, 2D coverability, Pin Conflicts, Stage 2 invariants, and 7-day-off eligibility (`src/__tests__/autoScheduler.test.ts,src/__tests__/derivedMetrics.test.ts`)
+- [x] **T6**: Checkpoint 1 (Mid-Build): Verify Domain, Solver & Metrics typecheck and unit tests (`src/domain/autoScheduler.ts`)
+- [x] **T7**: Implement backward-compatible schemaVersion 1 validation for daysOfWeek, unavailableDays, and inactive-day assignments in storageSchema + persistence tests (`src/persistence/storageSchema.ts,src/__tests__/persistence.test.ts`)
+- [x] **T8**: Extend state actions & store for shift daysOfWeek cascade delete, staff unavailableDays, inactive-day guard, and Undo snapshot filter + state tests (`src/state/scheduleEntityActions.ts,src/state/assignmentActions.ts,src/state/useScheduleStore.ts,src/__tests__/persistence.test.ts`)
+- [x] **T9**: Build reusable WeekdayToggleGroup and upgrade ManageShiftsModal (7-day toggles, min-1 active day guard, ConfirmDialog cascade-delete preview) (`src/ui/common/WeekdayToggleGroup.tsx,src/ui/panels/ManageShiftsModal.tsx`)
+- [x] **T10**: Upgrade StaffFormModal (7-day unavailability toggles) and StaffPanel (concise day-off summary) (`src/ui/panels/StaffFormModal.tsx,src/ui/panels/StaffPanel.tsx`)
+- [x] **T11**: Upgrade WeeklyRosterGrid (disabled/hatched cells & gapSlots), AssignmentChip (isUnavailableDay badge), AssignmentGuidancePopover, ScheduleWorkspaceScreen & TopActionBar + UI integration tests (`src/ui/roster/WeeklyRosterGrid.tsx,src/ui/roster/AssignmentChip.tsx,src/ui/roster/AssignmentGuidancePopover.tsx,src/ui/screens/ScheduleWorkspaceScreen.tsx,src/ui/workspace/TopActionBar.tsx,src/__tests__/uiAppShellAndPrepare.test.tsx,src/__tests__/uiRosterAndSummary.test.tsx`)
+- [x] **T12**: Checkpoint 2 (Final): Run full verification gate (typecheck, test coverage >=80%, solver benchmark) (`src/__tests__/autoScheduler.test.ts`)
