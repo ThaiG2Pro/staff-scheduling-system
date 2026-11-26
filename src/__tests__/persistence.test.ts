@@ -19,6 +19,7 @@ import type { ActionDeps } from '../state/actionTypes';
 import {
   assignStaffToShift,
   reassignStaff,
+  restoreAssignmentsSnapshot,
   togglePinAssignment,
   unassignStaff,
 } from '../state/assignmentActions';
@@ -40,6 +41,7 @@ import {
   deleteStaff,
   previewDeleteShiftInSchedule,
   previewDeleteStaffInSchedule,
+  previewDisableShiftDaysInSchedule,
   previewEditShiftInSchedule,
   reorderShiftTemplates,
   updateShiftTemplate,
@@ -710,5 +712,215 @@ describe('persistence & state (T-14, T-15, AC-01, AC-06)', () => {
       expect(delSched.state.activeScheduleId).toBeNull();
       expect(delSched.state.schedules).toHaveLength(0);
     }
+  });
+});
+
+describe('Phase 2: Storage Schema Backward Compatibility & Day Array Validation', () => {
+  it('loads legacy schemaVersion 1 payloads without daysOfWeek or unavailableDays and normalizes defaults (AC-P2-001)', () => {
+    const deps = createDeterministicDeps();
+    const base = loadDemoStore(createEmptyPersistedState(), deps).state;
+    const storage = new MemoryStorage();
+
+    // Legacy payload without optional fields
+    storage.data.set(PRIMARY_STORAGE_KEY, JSON.stringify(base));
+    const legacyLoad = loadState(() => storage);
+    expect(legacyLoad.storageMode).toBe('normal');
+    expect(legacyLoad.state.schedules[0]!.shifts[0]!.daysOfWeek).toBeUndefined();
+    expect(legacyLoad.state.schedules[0]!.staff[0]!.unavailableDays).toBeUndefined();
+
+    // Payload with explicit default [0..6] and [] normalizes to undefined (omitted defaults)
+    const explicitDefaults = {
+      ...base,
+      schedules: [
+        {
+          ...base.schedules[0]!,
+          shifts: base.schedules[0]!.shifts.map((sh) => ({
+            ...sh,
+            daysOfWeek: [6, 5, 4, 3, 2, 1, 0],
+          })),
+          staff: base.schedules[0]!.staff.map((st) => ({
+            ...st,
+            unavailableDays: [],
+          })),
+        },
+      ],
+    };
+    const normRes = validatePersistedState(explicitDefaults);
+    expect(normRes.kind).toBe('OK');
+    if (normRes.kind === 'OK') {
+      expect(normRes.state.schedules[0]!.shifts[0]!.daysOfWeek).toBeUndefined();
+      expect(normRes.state.schedules[0]!.staff[0]!.unavailableDays).toBeUndefined();
+    }
+
+    // Payload with valid restricted daysOfWeek and unavailableDays sorts ascending & round-trips
+    const restricted = {
+      ...base,
+      schedules: [
+        {
+          ...base.schedules[0]!,
+          shifts: [{ ...base.schedules[0]!.shifts[0]!, daysOfWeek: [6, 5] }],
+          staff: [{ ...base.schedules[0]!.staff[0]!, unavailableDays: [6, 2] }],
+          assignments: [],
+        },
+      ],
+    };
+    const res = validatePersistedState(restricted);
+    expect(res.kind).toBe('OK');
+    if (res.kind === 'OK') {
+      expect(res.state.schedules[0]!.shifts[0]!.daysOfWeek).toEqual([5, 6]);
+      expect(res.state.schedules[0]!.staff[0]!.unavailableDays).toEqual([2, 6]);
+    }
+  });
+
+  it('rejects malformed daysOfWeek, unavailableDays, and assignments on inactive shift days as CORRUPT_SCHEMA (AC-P2-002)', () => {
+    const deps = createDeterministicDeps();
+    const base = loadDemoStore(createEmptyPersistedState(), deps).state;
+    const baseSched = base.schedules[0]!;
+    const sh0 = baseSched.shifts[0]!;
+    const st0 = baseSched.staff[0]!;
+
+    const badPayloads: unknown[] = [
+      // Empty daysOfWeek []
+      { ...base, schedules: [{ ...baseSched, shifts: [{ ...sh0, daysOfWeek: [] }], assignments: [] }] },
+      // Non-array daysOfWeek
+      { ...base, schedules: [{ ...baseSched, shifts: [{ ...sh0, daysOfWeek: 'Mon' }], assignments: [] }] },
+      // Out-of-range daysOfWeek (-1, 7)
+      { ...base, schedules: [{ ...baseSched, shifts: [{ ...sh0, daysOfWeek: [-1, 0] }], assignments: [] }] },
+      { ...base, schedules: [{ ...baseSched, shifts: [{ ...sh0, daysOfWeek: [0, 7] }], assignments: [] }] },
+      // Non-integer daysOfWeek
+      { ...base, schedules: [{ ...baseSched, shifts: [{ ...sh0, daysOfWeek: [1.5] }], assignments: [] }] },
+      // Duplicate daysOfWeek
+      { ...base, schedules: [{ ...baseSched, shifts: [{ ...sh0, daysOfWeek: [0, 0] }], assignments: [] }] },
+      // Non-array unavailableDays
+      { ...base, schedules: [{ ...baseSched, staff: [{ ...st0, unavailableDays: 2 }], assignments: [] }] },
+      // Out-of-range unavailableDays
+      { ...base, schedules: [{ ...baseSched, staff: [{ ...st0, unavailableDays: [7] }], assignments: [] }] },
+      // Non-integer unavailableDays
+      { ...base, schedules: [{ ...baseSched, staff: [{ ...st0, unavailableDays: ['0'] }], assignments: [] }] },
+      // Duplicate unavailableDays
+      { ...base, schedules: [{ ...baseSched, staff: [{ ...st0, unavailableDays: [2, 2] }], assignments: [] }] },
+      // Persisted assignment on inactive shift day -> CORRUPT_SCHEMA
+      {
+        ...base,
+        schedules: [
+          {
+            ...baseSched,
+            shifts: [{ ...sh0, daysOfWeek: [5, 6] }],
+            assignments: [
+              { id: 'bad-day-assign', day: 0, shiftId: sh0.id, staffId: st0.id, isPinned: false },
+            ],
+          },
+        ],
+      },
+    ];
+
+    for (const payload of badPayloads) {
+      expect(validatePersistedState(payload).kind).toBe('CORRUPT_SCHEMA');
+    }
+
+    // Verify loadState enters recovery_locked on corrupt daysOfWeek
+    const storage = new MemoryStorage();
+    storage.data.set(PRIMARY_STORAGE_KEY, JSON.stringify(badPayloads[0]));
+    expect(loadState(() => storage).storageMode).toBe('recovery_locked');
+  });
+
+  it('enforces shift daysOfWeek cascade delete, staff unavailableDays, inactive-day guard, and Undo snapshot filter (AC-P2-003, AC-P2-005, AC-P2-008)', () => {
+    const deps = createDeterministicDeps();
+    let state = createEmptyPersistedState();
+    const created = createSchedule(state, 'Phase 2 State', deps);
+    if (!created.ok) return;
+    state = created.state;
+    const schedId = created.scheduleId;
+
+    // 1. addShiftTemplate rejects empty daysOfWeek [] and omits default [0..6]
+    expect(
+      addShiftTemplate(state, schedId, { startHour: 8, endHour: 12, daysOfWeek: [] }, deps).ok,
+    ).toBe(false);
+    const fullWeekShift = addShiftTemplate(
+      state,
+      schedId,
+      { startHour: 8, endHour: 12, daysOfWeek: [6, 5, 4, 3, 2, 1, 0] },
+      deps,
+    );
+    expect(fullWeekShift.ok).toBe(true);
+    if (!fullWeekShift.ok) return;
+    state = fullWeekShift.state;
+    const shId = fullWeekShift.shiftId;
+    expect(state.schedules[0]!.shifts.find((s) => s.id === shId)?.daysOfWeek).toBeUndefined();
+
+    // 2. addStaff / updateStaff with unavailableDays normalizes & preserves when omitted
+    const stRes = addStaff(
+      state,
+      schedId,
+      { name: 'Alice', maxWeeklyHours: 40, unavailableDays: [6, 2, 2] },
+      deps,
+    );
+    expect(stRes.ok).toBe(true);
+    if (!stRes.ok) return;
+    state = stRes.state;
+    const stId = stRes.staffId;
+    expect(state.schedules[0]!.staff[0]!.unavailableDays).toEqual([2, 6]);
+
+    // Legacy updateStaff without unavailableDays preserves [2, 6]
+    const legacyUpd = updateStaff(state, schedId, stId, { name: 'Alice M', maxWeeklyHours: 36 }, deps);
+    expect(legacyUpd.ok).toBe(true);
+    if (!legacyUpd.ok) return;
+    state = legacyUpd.state;
+    expect(state.schedules[0]!.staff[0]!.unavailableDays).toEqual([2, 6]);
+
+    // Clearing unavailableDays to [] omits the field
+    const clearUpd = updateStaff(
+      state,
+      schedId,
+      stId,
+      { name: 'Alice M', maxWeeklyHours: 36, unavailableDays: [] },
+      deps,
+    );
+    expect(clearUpd.ok).toBe(true);
+    if (!clearUpd.ok) return;
+    state = clearUpd.state;
+    expect(state.schedules[0]!.staff[0]!.unavailableDays).toBeUndefined();
+
+    // 3. Assign on Mon (0, regular) and Sat (5, pinned), then disable Sat -> preview & atomic cascade delete
+    const aMon = assignStaffToShift(state, schedId, { day: 0, shiftId: shId, staffId: stId }, deps);
+    if (!aMon.ok) return;
+    state = aMon.state;
+    const aSat = assignStaffToShift(state, schedId, { day: 5, shiftId: shId, staffId: stId }, deps);
+    if (!aSat.ok) return;
+    state = aSat.state;
+    const pinSat = togglePinAssignment(state, schedId, aSat.assignmentId, deps);
+    if (!pinSat.ok) return;
+    state = pinSat.state;
+
+    const snapshotWithSat = state.schedules[0]!.assignments.slice();
+    const preview = previewDisableShiftDaysInSchedule(state, schedId, shId, [0, 1, 2, 3, 4]);
+    expect(preview.affectedAssignmentsCount).toBe(1);
+    expect(preview.affectedAssignmentIds).toEqual([aSat.assignmentId]);
+
+    const updShift = updateShiftTemplate(
+      state,
+      schedId,
+      shId,
+      { startHour: 8, endHour: 12, daysOfWeek: [0, 1, 2, 3, 4] },
+      deps,
+    );
+    expect(updShift.ok).toBe(true);
+    if (!updShift.ok) return;
+    expect(updShift.removedAssignmentsCount).toBe(1);
+    state = updShift.state;
+    expect(state.schedules[0]!.assignments).toHaveLength(1);
+    expect(state.schedules[0]!.assignments[0]!.day).toBe(0);
+
+    // 4. Assigning on inactive day Sat (5) is blocked
+    expect(
+      assignStaffToShift(state, schedId, { day: 5, shiftId: shId, staffId: stId }, deps).ok,
+    ).toBe(false);
+
+    // 5. Undo snapshot (Ctrl+Z) filters out assignment on now-inactive Sat (5)
+    const undoRes = restoreAssignmentsSnapshot(state, schedId, snapshotWithSat, deps);
+    expect(undoRes.ok).toBe(true);
+    if (!undoRes.ok) return;
+    expect(undoRes.state.schedules[0]!.assignments).toHaveLength(1);
+    expect(undoRes.state.schedules[0]!.assignments[0]!.day).toBe(0);
   });
 });

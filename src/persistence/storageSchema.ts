@@ -5,11 +5,13 @@
  */
 
 import {
+  DAYS_IN_WEEK,
   MAX_OPERATING_HOUR_INCLUSIVE,
   MAX_SHIFT_END_HOUR,
   MIN_OPERATING_HOUR,
 } from '../domain/constants';
 import { isValidTargetN } from '../domain/decimalMath';
+import { isShiftActiveOnDay } from '../domain/hardRules';
 import type { Assignment, DayOfWeek, Schedule, ShiftTemplate, Staff } from '../domain/types';
 import {
   isNonEmptyString,
@@ -24,6 +26,45 @@ export type SchemaValidationResult =
   | { kind: 'OK'; state: PersistedAppState; warnings: string[] }
   | { kind: 'INCOMPATIBLE_VERSION'; version: number; message: string }
   | { kind: 'CORRUPT_SCHEMA'; message: string };
+
+function validateOptionalDayArray(
+  raw: unknown,
+  fieldPath: string,
+  options: { allowEmpty: boolean; omitWhenAllSeven?: boolean; omitWhenEmpty?: boolean },
+): { ok: true; value: DayOfWeek[] | undefined } | { ok: false; message: string } {
+  if (raw === undefined) {
+    return { ok: true, value: undefined };
+  }
+  if (!Array.isArray(raw)) {
+    return { ok: false, message: `${fieldPath} must be an array of unique integers in [0, 6].` };
+  }
+  if (!options.allowEmpty && raw.length === 0) {
+    return { ok: false, message: `${fieldPath} must contain at least 1 active day.` };
+  }
+
+  const seen = new Set<number>();
+  const days: DayOfWeek[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const d = raw[i];
+    if (typeof d !== 'number' || !Number.isInteger(d) || d < 0 || d > 6) {
+      return { ok: false, message: `${fieldPath}[${i}] must be an integer in [0, 6].` };
+    }
+    if (seen.has(d)) {
+      return { ok: false, message: `${fieldPath} contains duplicate day ${d}.` };
+    }
+    seen.add(d);
+    days.push(d as DayOfWeek);
+  }
+
+  days.sort((a, b) => a - b);
+  if (options.omitWhenEmpty && days.length === 0) {
+    return { ok: true, value: undefined };
+  }
+  if (options.omitWhenAllSeven && days.length === DAYS_IN_WEEK) {
+    return { ok: true, value: undefined };
+  }
+  return { ok: true, value: days };
+}
 
 function validateStaffList(
   rawStaff: unknown,
@@ -53,8 +94,20 @@ function validateStaffList(
         message: `${scheduleLabel}.staff[${i}].maxWeeklyHours must be a non-negative safe integer.`,
       };
     }
+    const unavailRes = validateOptionalDayArray(
+      item.unavailableDays,
+      `${scheduleLabel}.staff[${i}].unavailableDays`,
+      { allowEmpty: true, omitWhenEmpty: true },
+    );
+    if (!unavailRes.ok) return unavailRes;
+
     staffIds.add(item.id);
-    staff.push({ id: item.id, name: item.name, maxWeeklyHours: item.maxWeeklyHours });
+    staff.push({
+      id: item.id,
+      name: item.name,
+      maxWeeklyHours: item.maxWeeklyHours,
+      ...(unavailRes.value !== undefined ? { unavailableDays: unavailRes.value } : {}),
+    });
   }
 
   return { ok: true, staff, staffIds };
@@ -63,13 +116,15 @@ function validateStaffList(
 function validateShiftList(
   rawShifts: unknown,
   scheduleLabel: string,
-): { ok: true; shifts: ShiftTemplate[]; shiftIds: Set<string> } | { ok: false; message: string } {
+):
+  | { ok: true; shifts: ShiftTemplate[]; shiftMap: Map<string, ShiftTemplate> }
+  | { ok: false; message: string } {
   if (!Array.isArray(rawShifts)) {
     return { ok: false, message: `${scheduleLabel}.shifts must be an array.` };
   }
 
   const shifts: ShiftTemplate[] = [];
-  const shiftIds = new Set<string>();
+  const shiftMap = new Map<string, ShiftTemplate>();
   const timePairs = new Set<string>();
 
   for (let i = 0; i < rawShifts.length; i++) {
@@ -77,7 +132,7 @@ function validateShiftList(
     if (!isPlainObject(item)) {
       return { ok: false, message: `${scheduleLabel}.shifts[${i}] must be an object.` };
     }
-    if (!isNonEmptyString(item.id) || shiftIds.has(item.id)) {
+    if (!isNonEmptyString(item.id) || shiftMap.has(item.id)) {
       return { ok: false, message: `${scheduleLabel}.shifts[${i}].id must be a unique non-empty string.` };
     }
     if (
@@ -109,19 +164,32 @@ function validateShiftList(
       };
     }
 
-    shiftIds.add(item.id);
+    const daysRes = validateOptionalDayArray(
+      item.daysOfWeek,
+      `${scheduleLabel}.shifts[${i}].daysOfWeek`,
+      { allowEmpty: false, omitWhenAllSeven: true },
+    );
+    if (!daysRes.ok) return daysRes;
+
+    const shift: ShiftTemplate = {
+      id: item.id,
+      startHour: item.startHour,
+      endHour: item.endHour,
+      ...(daysRes.value !== undefined ? { daysOfWeek: daysRes.value } : {}),
+    };
+    shiftMap.set(item.id, shift);
     timePairs.add(pairKey);
-    shifts.push({ id: item.id, startHour: item.startHour, endHour: item.endHour });
+    shifts.push(shift);
   }
 
-  return { ok: true, shifts, shiftIds };
+  return { ok: true, shifts, shiftMap };
 }
 
 function validateAssignmentList(
   rawAssignments: unknown,
   scheduleLabel: string,
   staffIds: ReadonlySet<string>,
-  shiftIds: ReadonlySet<string>,
+  shiftMap: ReadonlyMap<string, ShiftTemplate>,
   warnings: string[],
 ): { ok: true; assignments: Assignment[] } | { ok: false; message: string } {
   if (!Array.isArray(rawAssignments)) {
@@ -159,11 +227,19 @@ function validateAssignmentList(
     assignmentIds.add(item.id);
 
     // Strip orphan assignments on an otherwise structurally valid payload with a warning (§7.4).
-    if (!staffIds.has(item.staffId) || !shiftIds.has(item.shiftId)) {
+    const shift = shiftMap.get(item.shiftId);
+    if (!staffIds.has(item.staffId) || !shift) {
       warnings.push(
         `Removed orphan assignment "${item.id}" in ${scheduleLabel} referencing missing staff or shift.`,
       );
       continue;
+    }
+
+    if (!isShiftActiveOnDay(shift, item.day as DayOfWeek)) {
+      return {
+        ok: false,
+        message: `${scheduleLabel}.assignments[${i}] targets inactive day ${item.day} for shift "${item.shiftId}".`,
+      };
     }
 
     const tripleKey = `${item.day}|${item.shiftId}|${item.staffId}`;
@@ -233,7 +309,7 @@ function validateSchedule(
     rawSchedule.assignments,
     label,
     staffRes.staffIds,
-    shiftRes.shiftIds,
+    shiftRes.shiftMap,
     warnings,
   );
   if (!assignmentRes.ok) return assignmentRes;
