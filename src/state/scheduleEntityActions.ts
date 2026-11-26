@@ -16,6 +16,7 @@ import {
   previewDisableShiftDays,
 } from '../domain/constraints';
 import { isShiftActiveOnDay, normalizeDayArray } from '../domain/hardRules';
+import { parseStaffCsv, type StaffCsvParseError } from '../domain/staffCsvParser';
 import type { DayOfWeek, DeletePreview, Schedule, ShiftTemplate, Staff } from '../domain/types';
 import type { PersistedAppState } from '../persistence/storageTypes';
 import { DEFAULT_ACTION_DEPS, type ActionDeps, type StateActionResult } from './actionTypes';
@@ -194,6 +195,109 @@ export function updateStaff(
   };
 
   return { ok: true, state: replaceSchedule(state, updatedSchedule), changed: true };
+}
+
+export type StaffCsvImportActionResult =
+  | {
+      ok: true;
+      state: PersistedAppState;
+      changed: boolean;
+      addedCount: number;
+      updatedCount: number;
+      skippedCount: number;
+    }
+  | { ok: false; errors: StaffCsvParseError[] };
+
+/**
+ * Bulk-imports staff rows from CSV text into the specified schedule.
+ * Preserves all existing staff and assignments; never deletes existing staff.
+ * When `updateExisting` is true (default), rows matching an existing staff name
+ * (case-insensitive) update `maxWeeklyHours` and `unavailableDays` in place.
+ */
+export function importStaffCsvToSchedule(
+  state: Readonly<PersistedAppState>,
+  scheduleId: string,
+  csvText: string,
+  options: { updateExisting: boolean },
+  deps: ActionDeps = DEFAULT_ACTION_DEPS,
+): StaffCsvImportActionResult {
+  const schedule = findSchedule(state, scheduleId);
+  if (!schedule) {
+    return { ok: false, errors: [{ message: 'Schedule not found.' }] };
+  }
+
+  const parsed = parseStaffCsv(csvText);
+  if (!parsed.ok) {
+    return { ok: false, errors: parsed.errors };
+  }
+
+  const existingByName = new Map<string, number>();
+  schedule.staff.forEach((st, idx) => {
+    const key = st.name.trim().toLowerCase();
+    if (!existingByName.has(key)) existingByName.set(key, idx);
+  });
+
+  const nextStaff: Staff[] = [...schedule.staff];
+  let addedCount = 0;
+  let updatedCount = 0;
+  let skippedCount = 0;
+
+  for (const row of parsed.rows) {
+    const key = row.name.trim().toLowerCase();
+    const existingIdx = existingByName.get(key);
+
+    if (existingIdx !== undefined) {
+      if (options.updateExisting) {
+        const current = nextStaff[existingIdx]!;
+        nextStaff[existingIdx] = {
+          id: current.id,
+          name: row.name,
+          maxWeeklyHours: row.maxWeeklyHours,
+          ...(row.unavailableDays ? { unavailableDays: row.unavailableDays } : {}),
+        };
+        updatedCount += 1;
+      } else {
+        skippedCount += 1;
+      }
+    } else {
+      const created: Staff = {
+        id: deps.generateId(),
+        name: row.name,
+        maxWeeklyHours: row.maxWeeklyHours,
+        ...(row.unavailableDays ? { unavailableDays: row.unavailableDays } : {}),
+      };
+      existingByName.set(key, nextStaff.length);
+      nextStaff.push(created);
+      addedCount += 1;
+    }
+  }
+
+  const changed = addedCount > 0 || updatedCount > 0;
+  if (!changed) {
+    return {
+      ok: true,
+      state: state as PersistedAppState,
+      changed: false,
+      addedCount,
+      updatedCount,
+      skippedCount,
+    };
+  }
+
+  const updatedSchedule: Schedule = {
+    ...schedule,
+    updatedAt: deps.nowIso(),
+    staff: nextStaff,
+  };
+
+  return {
+    ok: true,
+    state: replaceSchedule(state, updatedSchedule),
+    changed: true,
+    addedCount,
+    updatedCount,
+    skippedCount,
+  };
 }
 
 /** Previews affected assignments before deleting a Staff member in a specific schedule (E-08). */

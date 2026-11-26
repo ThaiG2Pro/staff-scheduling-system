@@ -16,13 +16,32 @@ pnpm install
 pnpm run dev
 ```
 
-You can open http://localhost:5173 in your browser to start planning immediately. The app saves all data locally in `localStorage`, includes a built-in demo schedule, and imports `report_Transaction_20260807_20260813.csv` directly.
+You can open http://localhost:5173 in your browser to start planning immediately. The app saves all data locally in `localStorage`.
+
+### Try It in 30 Seconds (Demo Data or Sample CSVs)
+
+**Option A — One-Click Demo Store (Fastest)**
+1. Click **Load Demo Store** on the start screen. It pre-loads the default demand dataset (`docs/report_Transaction_20260807_20260813.csv`), the default 9-person team (`docs/sample_staff_demo.csv`), and two daily shifts (`07:00–15:00`, `15:00–23:00`).
+2. Click **Auto-schedule** to generate a balanced weekly roster in milliseconds.
+3. Open **Hourly Summary (7×16)** and click any day header or hour cell to inspect the **Daily Demand vs. Scheduled** chart.
+
+**Option B — Upload / Paste a Transaction CSV + Staff CSV Pair**
+1. Click **Create Schedule** (or open an existing schedule).
+2. **Load hourly demand:** Click **Import CSV** in the top bar and upload (or paste) any `7 days × 16 hours` transaction file from `docs/`:
+   - `docs/report_Transaction_20260807_20260813.csv` — *Default Demo Store* (typical retail week, Fri–Thu export normalized to Mon–Sun).
+   - `docs/report_Transaction_weekend_rush.csv` — *Weekend Rush* (heavy Fri evening & Sat/Sun spikes up to 92 txns/hr).
+   - `docs/report_Transaction_cafe_morning_peak.csv` — *Morning Peak* (intense 7am–11am commuter rush, quiet evenings).
+3. **Load team roster:** Click **Import** in the right-hand **Team** panel and upload (or paste) a staff CSV (`name,max_weekly_hours,unavailable_days`):
+   - `docs/sample_staff_demo.csv` — *Default Demo Store* (9 staff, 16h–40h weekly caps, available all 7 days).
+   - `docs/sample_staff_busy_store.csv` — *Busy Store* (14 staff with mixed weekly caps and `unavailable_days` — pairs well with `report_Transaction_weekend_rush.csv`).
+   - Tip: Leave **Update existing staff with matching names** checked (default) to update hours/days off in place without losing existing assignments.
+4. Click **Auto-schedule** to run the solver on your chosen pair.
 
 ### Verification Commands
 
 ```bash
 pnpm run typecheck                        # Verify TypeScript types (0 errors)
-pnpm test                                 # Run unit & UI integration tests (8 files, 53 tests)
+pnpm test                                 # Run unit & UI integration tests (10 files, 73 tests)
 pnpm run test:coverage                    # Check test coverage (~90.6% stmts / ~90.1% branches)
 pnpm run build && pnpm run bench:browser  # Measure browser scheduling speed (100 runs/dataset)
 ```

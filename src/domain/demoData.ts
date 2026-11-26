@@ -6,6 +6,7 @@
 
 import { DEFAULT_TARGET_N } from './constants';
 import { parseCsvTransactions } from './csvParser';
+import { parseStaffCsv } from './staffCsvParser';
 import type { DemandDataset, Schedule, ShiftTemplate, Staff } from './types';
 
 /** Official sample transaction report (Fri 07 Aug – Thu 13 Aug 2026) used by Demo Store. */
@@ -30,22 +31,19 @@ export const DEMO_STORE_CSV_TEXT = [
   '10pm,5,5,6,7,2,6,6',
 ].join('\n');
 
-interface DemoStaffSeed {
-  readonly name: string;
-  readonly maxWeeklyHours: number;
-}
-
-const DEMO_STAFF_SEEDS: readonly DemoStaffSeed[] = [
-  { name: 'Alice Nguyen', maxWeeklyHours: 40 },
-  { name: 'Brian Tran', maxWeeklyHours: 40 },
-  { name: 'Chloe Le', maxWeeklyHours: 40 },
-  { name: 'David Pham', maxWeeklyHours: 32 },
-  { name: 'Elena Vo', maxWeeklyHours: 32 },
-  { name: 'Felix Hoang', maxWeeklyHours: 24 },
-  { name: 'Grace Bui', maxWeeklyHours: 24 },
-  { name: 'Henry Dang', maxWeeklyHours: 16 },
-  { name: 'Iris Do', maxWeeklyHours: 16 },
-];
+/** Default Demo Store staff CSV (mirrors `docs/sample_staff_demo.csv`). */
+export const DEMO_STAFF_CSV_TEXT = [
+  'name,max_weekly_hours,unavailable_days',
+  'Alice Nguyen,40,',
+  'Brian Tran,40,',
+  'Chloe Le,40,',
+  'David Pham,32,',
+  'Elena Vo,32,',
+  'Felix Hoang,24,',
+  'Grace Bui,24,',
+  'Henry Dang,16,',
+  'Iris Do,16,',
+].join('\n');
 
 /**
  * Creates the 2 default shift templates (`07:00–15:00` and `15:00–23:00`) seeded on every new schedule.
@@ -83,10 +81,18 @@ export function createDemoStoreSchedule(deps: {
     transactions: parsed.transactions,
   };
 
-  const staff: Staff[] = DEMO_STAFF_SEEDS.map((seed) => ({
+  const parsedStaff = parseStaffCsv(DEMO_STAFF_CSV_TEXT);
+  if (!parsedStaff.ok) {
+    throw new Error(
+      `Demo Store staff CSV fixture failed to parse: ${parsedStaff.errors[0]?.message ?? 'unknown error'}`,
+    );
+  }
+
+  const staff: Staff[] = parsedStaff.rows.map((seed) => ({
     id: deps.generateId(),
     name: seed.name,
     maxWeeklyHours: seed.maxWeeklyHours,
+    ...(seed.unavailableDays ? { unavailableDays: seed.unavailableDays } : {}),
   }));
 
   return {

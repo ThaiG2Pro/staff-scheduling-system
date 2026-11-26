@@ -55,6 +55,7 @@ import {
   addStaff,
   deleteShiftTemplate,
   deleteStaff,
+  importStaffCsvToSchedule,
   previewDeleteShiftInSchedule,
   previewDeleteStaffInSchedule,
   previewDisableShiftDaysInSchedule,
@@ -62,6 +63,7 @@ import {
   reorderShiftTemplates,
   updateShiftTemplate,
   updateStaff,
+  type StaffCsvImportActionResult,
 } from './scheduleEntityActions';
 
 export interface StoreOptions {
@@ -97,6 +99,11 @@ export interface ScheduleStore {
     staffId: string,
     input: { name: string; maxWeeklyHours: number; unavailableDays?: DayOfWeek[] },
   ) => StateActionResult;
+  importStaffCsv: (
+    scheduleId: string,
+    csvText: string,
+    options: { updateExisting: boolean },
+  ) => StaffCsvImportActionResult;
   previewDeleteStaff: (scheduleId: string, staffId: string) => DeletePreview;
   deleteStaff: (scheduleId: string, staffId: string) => StateActionResult<{ removedAssignmentsCount: number }>;
   addShiftTemplate: (
@@ -279,6 +286,14 @@ export function useScheduleStore(
       runWritable((cur) => addStaff(cur, scheduleId, input, deps), () => scheduleId),
     updateStaff: (scheduleId, staffId, input) =>
       runWritable((cur) => updateStaff(cur, scheduleId, staffId, input, deps), () => scheduleId),
+    importStaffCsv: (scheduleId, csvText, options) => {
+      if (storageModeRef.current !== 'normal') {
+        return { ok: false, errors: [{ message: LOCKED_ERROR }] };
+      }
+      const res = importStaffCsvToSchedule(persistedRef.current, scheduleId, csvText, options, deps);
+      if (res.ok && res.changed) commitState(res.state, scheduleId);
+      return res;
+    },
     previewDeleteStaff: (scheduleId, staffId) =>
       previewDeleteStaffInSchedule(persistedRef.current, scheduleId, staffId),
     deleteStaff: (scheduleId, staffId) =>

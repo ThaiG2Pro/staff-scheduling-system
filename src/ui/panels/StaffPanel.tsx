@@ -5,7 +5,7 @@
  */
 
 import { useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Pencil, Plus, Search, Trash2, Users } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Pencil, Plus, Search, Trash2, Upload, Users } from 'lucide-react';
 import { DAY_LABELS } from '../../domain/constants';
 import type { Staff, StaffMetrics } from '../../domain/types';
 import { formatWeekdaySummary } from '../common/WeekdayToggleGroup';
@@ -27,6 +27,7 @@ export interface StaffPanelProps {
   } | null;
   onSelectStaff: (staffId: string | null) => void;
   onAddStaff: () => void;
+  onImportStaff?: () => void;
   onEditStaff: (staff: Staff) => void;
   onRequestDeleteStaff: (staff: Staff) => void;
 }
@@ -75,6 +76,7 @@ export function StaffPanel({
   fairnessExtremes = null,
   onSelectStaff,
   onAddStaff,
+  onImportStaff,
   onEditStaff,
   onRequestDeleteStaff,
 }: StaffPanelProps) {
@@ -160,14 +162,28 @@ export function StaffPanel({
             <Users className="h-4 w-4 text-slate-700" aria-hidden="true" />
             <h2 className="text-sm font-bold text-slate-900">Team ({staff.length})</h2>
           </div>
-          <button
-            type="button"
-            onClick={onAddStaff}
-            className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
-          >
-            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-            Add Staff
-          </button>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {onImportStaff && (
+              <button
+                type="button"
+                onClick={onImportStaff}
+                title="Import staff from CSV file or pasted text"
+                aria-label="Import Staff CSV"
+                className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
+              >
+                <Upload className="h-3.5 w-3.5" aria-hidden="true" />
+                Import
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onAddStaff}
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+              Add Staff
+            </button>
+          </div>
         </div>
 
         <p className="text-xs text-slate-700 tabular-nums">

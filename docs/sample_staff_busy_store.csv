@@ -1,0 +1,15 @@
+name,max_weekly_hours,unavailable_days
+Alice Nguyen,40,Sun
+Brian Tran,40,Mon
+Chloe Le,40,
+David Pham,32,Sat;Sun
+Elena Vo,32,Tue;Thu
+Felix Hoang,24,Mon;Wed
+Grace Bui,24,Fri
+Henry Dang,16,Mon;Tue;Wed;Thu;Fri
+Iris Do,16,Mon;Tue;Wed;Thu;Fri
+Jack Truong,40,Wed
+Kira Vu,32,Sun
+Liam Ngo,24,Tue;Thu
+Mia Dinh,24,Mon;Fri
+Noah Ly,16,Mon;Tue;Wed;Thu

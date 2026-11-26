@@ -37,6 +37,7 @@ import {
 import { CsvImportModal } from '../panels/CsvImportModal';
 import { ManageShiftsModal } from '../panels/ManageShiftsModal';
 import { StaffFormModal } from '../panels/StaffFormModal';
+import { StaffImportModal } from '../panels/StaffImportModal';
 import { StaffPanel, type StaffFilterMode, type StaffSortMode } from '../panels/StaffPanel';
 import { WeeklyRosterGrid, type FocusedRosterSlot } from '../roster/WeeklyRosterGrid';
 import {
@@ -95,6 +96,7 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
   const [lastAutoRuns, setLastAutoRuns] = useState<Record<string, SimulatorScheduleSnapshot>>({});
 
   const [csvModalOpen, setCsvModalOpen] = useState(false);
+  const [staffImportModalOpen, setStaffImportModalOpen] = useState(false);
   const [shiftsModalOpen, setShiftsModalOpen] = useState(false);
   const [staffModalState, setStaffModalState] = useState<{
     open: boolean;
@@ -982,6 +984,7 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
                 if (staffId) setActiveTab('roster');
               }}
               onAddStaff={() => setStaffModalState({ open: true, editing: null })}
+              onImportStaff={() => setStaffImportModalOpen(true)}
               onEditStaff={(member) => setStaffModalState({ open: true, editing: member })}
               onRequestDeleteStaff={handleRequestDeleteStaff}
             />
@@ -1027,6 +1030,27 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
           return store.addStaff(schedule.id, input);
         }}
         onClose={() => setStaffModalState({ open: false, editing: null })}
+      />
+
+      <StaffImportModal
+        open={staffImportModalOpen}
+        existingStaff={schedule.staff}
+        onImport={(csvText, options) => {
+          const res = store.importStaffCsv(schedule.id, csvText, options);
+          if (res.ok) {
+            const parts: string[] = [];
+            if (res.addedCount > 0) parts.push(`${res.addedCount} added`);
+            if (res.updatedCount > 0) parts.push(`${res.updatedCount} updated`);
+            if (res.skippedCount > 0) parts.push(`${res.skippedCount} skipped`);
+            setBanner({
+              kind: 'notice',
+              tone: 'success',
+              title: `Staff CSV imported (${parts.join(', ') || 'no changes'}).`,
+            });
+          }
+          return res;
+        }}
+        onClose={() => setStaffImportModalOpen(false)}
       />
 
       <ManageShiftsModal
