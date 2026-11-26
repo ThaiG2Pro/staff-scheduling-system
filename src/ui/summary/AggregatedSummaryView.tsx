@@ -1,14 +1,15 @@
 /**
- * @file P0 Aggregated Summary View (`AC-05`) rendering the 4 mandatory weekly KPI cards
- * and the 7×16 hourly grid (`Mon–Sun` × `07:00–22:00`) with 3 stacked metrics per cell
- * (Transactions, Union-of-hours Staff hours, Txns/staff hr) and 1-click jump to Roster.
+ * @file P0 Aggregated Summary View (`AC-05`) rendering the 4 mandatory weekly KPI cards,
+ * an on-demand `DailyDemandChart` (opens on clicking any Day column or Hour×Day cell),
+ * and the 7×16 hourly grid (`Mon–Sun` × `07:00–22:00`) with `-Xh` day header badges
+ * and a single unified `... on Roster` action in the chart header.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
-  ArrowLeft,
   ArrowUpRight,
+  BarChart3,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -18,6 +19,7 @@ import {
 import { DAYS_OF_WEEK, DAY_LABELS, OPERATING_HOURS } from '../../domain/constants';
 import type { AggregatedSummary, DayOfWeek, OperatingHour } from '../../domain/types';
 import { formatHour24 } from '../common/formatters';
+import { DailyDemandChart } from './DailyDemandChart';
 
 export type FocusedSummaryTarget =
   | { kind: 'day'; day: DayOfWeek }
@@ -85,12 +87,10 @@ function getShortageHeatClasses(delta: number, isGap: boolean): { cellBg: string
 }
 
 /**
- * Displays the 4 weekly summary KPIs and 7×16 P0 hourly breakdown table.
- * Clicking any `Gap` or `High Load` (`txns/hr > targetN`) cell navigates directly to the
- * corresponding day and covering shifts in `WeeklyRosterGrid`.
- *
- * @param props - Derived `AggregatedSummary`, active `targetN`, and jump callback.
- * @returns Summary KPI strip and 7×16 hourly matrix.
+ * Displays the 4 weekly summary KPIs, an on-demand `DailyDemandChart`, and the 7×16 P0 hourly matrix.
+ * Clicking any Day column header or Hour×Day cell highlights it and opens the Daily Demand vs.
+ * Scheduled chart; navigating to `WeeklyRosterGrid` happens explicitly via the single Roster CTA
+ * in the chart header.
  */
 export function AggregatedSummaryView({
   summary,
@@ -100,12 +100,32 @@ export function AggregatedSummaryView({
   onClearCoverageLens,
   focusedTarget = null,
   onClearFocusedTarget,
-  onBackToRoster,
   onJumpToRosterCell,
   onJumpToRosterDay,
 }: AggregatedSummaryViewProps) {
   const [activePeakIndex, setActivePeakIndex] = useState(0);
+  const [selectedTarget, setSelectedTarget] = useState<FocusedSummaryTarget | null>(
+    () => focusedTarget,
+  );
   const cellRefs = useRef<Record<string, HTMLTableCellElement | null>>({});
+
+  // Daily rollups for `-Xh` shortage badges / covered dots on the 7×16 Mon–Sun column headers
+  const dayHeaderBadges = useMemo(() => {
+    return DAYS_OF_WEEK.map((day) => {
+      let requiredHours = 0;
+      let shortageHours = 0;
+      let hasDemand = false;
+      for (const hour of OPERATING_HOURS) {
+        const cell = summary.cells[day][hour];
+        if (cell.transactions !== null) hasDemand = true;
+        if (cell.requiredStaff !== null) requiredHours += cell.requiredStaff;
+        if (cell.coverageDelta !== null && cell.coverageDelta < 0) {
+          shortageHours += -cell.coverageDelta;
+        }
+      }
+      return { day, requiredHours, shortageHours, hasDemand };
+    });
+  }, [summary]);
 
   const understaffedCells = useMemo(() => {
     const list: Array<{
@@ -164,12 +184,29 @@ export function AggregatedSummaryView({
       ? understaffedCells[safePeakIndex] ?? null
       : null;
 
+  // Sync external focusedTarget (when jumping from Weekly Roster) into local selection
+  useEffect(() => {
+    if (focusedTarget) {
+      setSelectedTarget(focusedTarget);
+      if (focusedTarget.kind === 'cell') {
+        const key = `${focusedTarget.day}|${focusedTarget.hour}`;
+        cellRefs.current[key]?.scrollIntoView?.({
+          behavior: 'smooth',
+          block: 'center',
+          inline: 'nearest',
+        });
+      }
+    }
+  }, [focusedTarget]);
+
+  // Sync Coverage Lens active peak into selection & scroll into view
   useEffect(() => {
     if (!highlightUnderstaffedOnly) {
       setActivePeakIndex(0);
       return;
     }
     if (activePeak) {
+      setSelectedTarget({ kind: 'cell', day: activePeak.day, hour: activePeak.hour });
       cellRefs.current[activePeak.key]?.scrollIntoView?.({
         behavior: 'smooth',
         block: 'center',
@@ -178,65 +215,36 @@ export function AggregatedSummaryView({
     }
   }, [highlightUnderstaffedOnly, activePeak?.key]);
 
-  useEffect(() => {
-    if (focusedTarget?.kind === 'cell') {
-      const key = `${focusedTarget.day}|${focusedTarget.hour}`;
-      cellRefs.current[key]?.scrollIntoView?.({
-        behavior: 'smooth',
-        block: 'center',
-        inline: 'nearest',
-      });
+  const handleOpenSelectedInRoster = () => {
+    if (!selectedTarget) return;
+    if (selectedTarget.kind === 'cell') {
+      onJumpToRosterCell(selectedTarget.day, selectedTarget.hour);
+    } else if (onJumpToRosterDay) {
+      onJumpToRosterDay(selectedTarget.day);
+    } else {
+      onJumpToRosterCell(selectedTarget.day, 7);
     }
-  }, [focusedTarget]);
+  };
+
+  const handleCloseChart = () => {
+    setSelectedTarget(null);
+    onClearFocusedTarget?.();
+  };
+
+  const chartContextLabel = highlightUnderstaffedOnly
+    ? 'Coverage focus'
+    : focusedTarget &&
+        selectedTarget &&
+        focusedTarget.kind === selectedTarget.kind &&
+        focusedTarget.day === selectedTarget.day &&
+        (focusedTarget.kind === 'day' ||
+          (selectedTarget.kind === 'cell' && focusedTarget.hour === selectedTarget.hour))
+      ? 'From Weekly Roster'
+      : null;
 
   return (
     <div className="space-y-4 p-4">
-      {focusedTarget && !highlightUnderstaffedOnly && (
-        <div
-          role="status"
-          className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-xs text-indigo-950"
-        >
-          <span>
-            {focusedTarget.kind === 'day' ? (
-              <>
-                Focused from Weekly Roster:{' '}
-                <strong>{DAY_LABELS[focusedTarget.day]}</strong> — click any Gap or High load hour
-                to edit shifts.
-              </>
-            ) : (
-              <>
-                Returned from Weekly Roster:{' '}
-                <strong>
-                  {DAY_LABELS[focusedTarget.day]} {formatHour24(focusedTarget.hour)}
-                </strong>{' '}
-                — highlighted below.
-              </>
-            )}
-          </span>
-          <div className="flex items-center gap-1.5">
-            {onBackToRoster && (
-              <button
-                type="button"
-                onClick={onBackToRoster}
-                className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-2.5 py-0.5 text-[11px] font-semibold text-white hover:bg-indigo-700"
-              >
-                <ArrowLeft className="h-3 w-3" aria-hidden="true" />
-                Back to Roster
-              </button>
-            )}
-            {onClearFocusedTarget && (
-              <button
-                type="button"
-                onClick={onClearFocusedTarget}
-                className="inline-flex items-center gap-1 rounded-md border border-indigo-300 bg-white px-2 py-0.5 text-[11px] font-medium text-indigo-800 hover:bg-indigo-100"
-              >
-                <X className="h-3 w-3" aria-hidden="true" />
-                Clear focus
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+      {/* Coverage Lens stepper bar (navigation only — Roster CTA lives once in chart header) */}
       {highlightUnderstaffedOnly && (
         <div
           role="status"
@@ -280,16 +288,6 @@ export function AggregatedSummaryView({
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5">
-            {activePeak && (
-              <button
-                type="button"
-                onClick={() => onJumpToRosterCell(activePeak.day, activePeak.hour)}
-                className="inline-flex items-center gap-1 rounded-md bg-slate-900 px-2.5 py-0.5 text-[11px] font-semibold text-white hover:bg-slate-800"
-              >
-                Fix on Roster
-                <ArrowUpRight className="h-3 w-3" aria-hidden="true" />
-              </button>
-            )}
             {understaffedCells.length > 1 && (
               <>
                 <button
@@ -331,6 +329,7 @@ export function AggregatedSummaryView({
           </div>
         </div>
       )}
+
       {/* 4 Mandatory Weekly Totals (Secondary Reference Strip — subordinate to Health Bar) */}
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-200 grid grid-cols-1 gap-px sm:grid-cols-2 xl:grid-cols-4">
         <div className="bg-slate-50/90 px-4 py-3">
@@ -386,6 +385,31 @@ export function AggregatedSummaryView({
         </div>
       </div>
 
+      {/* On-demand Daily Demand vs. Scheduled Chart (closed until a Day or Hour×Day is clicked) */}
+      {selectedTarget ? (
+        <DailyDemandChart
+          summary={summary}
+          targetN={targetN}
+          day={selectedTarget.day}
+          selectedHour={selectedTarget.kind === 'cell' ? selectedTarget.hour : null}
+          contextLabel={chartContextLabel}
+          onSelectHour={(hour) =>
+            setSelectedTarget({ kind: 'cell', day: selectedTarget.day, hour })
+          }
+          onClearHour={() => setSelectedTarget({ kind: 'day', day: selectedTarget.day })}
+          onClose={handleCloseChart}
+          onOpenRoster={handleOpenSelectedInRoster}
+        />
+      ) : (
+        <div className="flex items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50/70 px-3.5 py-2 text-xs text-slate-600">
+          <BarChart3 className="h-3.5 w-3.5 shrink-0 text-indigo-500" aria-hidden="true" />
+          <span>
+            Click any <strong>day column header</strong> or <strong>hour cell</strong> below to open
+            its Daily Demand vs. Scheduled chart.
+          </span>
+        </div>
+      )}
+
       {/* Legend */}
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-700">
         <div className="flex flex-wrap items-center gap-3">
@@ -408,7 +432,7 @@ export function AggregatedSummaryView({
           <div className="flex flex-wrap items-center gap-2.5 text-[11px]">
             <span className="inline-flex items-center gap-1 rounded border border-rose-300 bg-rose-50 px-2 py-0.5 font-medium text-rose-800">
               <AlertTriangle className="h-3 w-3" aria-hidden="true" />
-              Gap (click to fix)
+              Gap
             </span>
             <span className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-2 py-0.5 font-medium text-amber-900">
               <ArrowUpRight className="h-3 w-3" aria-hidden="true" />
@@ -436,7 +460,7 @@ export function AggregatedSummaryView({
         )}
       </div>
 
-      {/* 7x16 Hourly Detail Matrix (P0: no daily total row) */}
+      {/* 7x16 Hourly Detail Matrix */}
       <div className="max-h-[600px] overflow-auto rounded-lg border border-slate-200">
         <table className="w-full min-w-[820px] border-collapse text-left">
           <thead>
@@ -448,32 +472,48 @@ export function AggregatedSummaryView({
                 Hour
               </th>
               {DAYS_OF_WEEK.map((day) => {
-                const isFocusedCol = !highlightUnderstaffedOnly && focusedTarget?.day === day;
+                const badge = dayHeaderBadges[day]!;
+                const isSelectedCol = selectedTarget?.day === day;
+                const hasIssue = badge.hasDemand && badge.shortageHours > 0;
+                const isCovered =
+                  badge.hasDemand && badge.shortageHours === 0 && badge.requiredHours > 0;
+
                 return (
                   <th
                     key={day}
                     scope="col"
                     className={`sticky top-0 z-20 border-r border-slate-200 p-0 text-center text-xs font-semibold last:border-r-0 ${
-                      isFocusedCol
+                      isSelectedCol
                         ? 'bg-indigo-100 text-indigo-950'
                         : day >= 5
                           ? 'bg-slate-200 text-slate-900'
                           : 'bg-slate-100 text-slate-900'
                     }`}
                   >
-                    {onJumpToRosterDay ? (
-                      <button
-                        type="button"
-                        onClick={() => onJumpToRosterDay(day)}
-                        title={`Inspect ${DAY_LABELS[day]} shifts on Weekly Roster`}
-                        aria-label={`Inspect ${DAY_LABELS[day]} on Weekly Roster`}
-                        className="w-full px-2.5 py-2 transition hover:bg-indigo-100/80 hover:text-indigo-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-600"
-                      >
-                        {DAY_LABELS[day]}
-                      </button>
-                    ) : (
-                      <div className="px-2.5 py-2">{DAY_LABELS[day]}</div>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTarget({ kind: 'day', day })}
+                      aria-pressed={isSelectedCol}
+                      aria-label={`Inspect ${DAY_LABELS[day]} chart`}
+                      title={`Click to open ${DAY_LABELS[day]} Demand vs. Scheduled chart`}
+                      className="inline-flex w-full items-center justify-center gap-1.5 px-2.5 py-2 transition hover:bg-indigo-100/80 hover:text-indigo-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-600"
+                    >
+                      <span>{DAY_LABELS[day]}</span>
+                      {hasIssue ? (
+                        <span
+                          className="rounded bg-rose-100 px-1 py-0.2 text-[10px] font-bold text-rose-800 tabular-nums"
+                          title={`${badge.shortageHours}h shortage on ${DAY_LABELS[day]}`}
+                        >
+                          -{badge.shortageHours}h
+                        </span>
+                      ) : isCovered ? (
+                        <span
+                          className="h-1.5 w-1.5 rounded-full bg-emerald-500"
+                          title={`${DAY_LABELS[day]} fully covered`}
+                          aria-hidden="true"
+                        />
+                      ) : null}
+                    </button>
                   </th>
                 );
               })}
@@ -518,13 +558,15 @@ export function AggregatedSummaryView({
                   let cellBg = day >= 5 ? 'bg-slate-50/70' : 'bg-white';
                   if (viewMode === 'coverage') {
                     if (shortageHeat) cellBg = shortageHeat.cellBg;
-                    else if (isExactCovered) cellBg = 'bg-emerald-50/80';
-                    else if (isSurplus) cellBg = 'bg-sky-50/80';
-                    else if (isZeroZero) cellBg = 'bg-slate-100/70';
+                    else if (isExactCovered) cellBg = 'bg-emerald-50/80 hover:bg-emerald-100/70';
+                    else if (isSurplus) cellBg = 'bg-sky-50/80 hover:bg-sky-100/70';
+                    else if (isZeroZero) cellBg = 'bg-slate-100/70 hover:bg-slate-200/50';
+                    else cellBg = `${cellBg} hover:bg-slate-100/70`;
                   } else {
                     if (isGap) cellBg = 'bg-rose-100 hover:bg-rose-200/70';
                     else if (highLoadHeat) cellBg = highLoadHeat.cellBg;
-                    else if (isZeroZero) cellBg = 'bg-slate-100/70';
+                    else if (isZeroZero) cellBg = 'bg-slate-100/70 hover:bg-slate-200/50';
+                    else cellBg = `${cellBg} hover:bg-slate-100/70`;
                   }
 
                   const content =
@@ -586,22 +628,14 @@ export function AggregatedSummaryView({
                     );
 
                   const cellKey = `${day}|${hour}`;
-                  const isActivePeakCell =
-                    highlightUnderstaffedOnly && activePeak?.key === cellKey;
-                  const isDimmedByCoverageLens = highlightUnderstaffedOnly && !isActionable;
-                  const isFocusedTargetCell =
-                    !highlightUnderstaffedOnly &&
-                    focusedTarget?.kind === 'cell' &&
-                    focusedTarget.day === day &&
-                    focusedTarget.hour === hour;
-                  const isFocusedTargetDay =
-                    !highlightUnderstaffedOnly &&
-                    focusedTarget?.kind === 'day' &&
-                    focusedTarget.day === day;
-                  const isDimmedByDayFocus =
-                    !highlightUnderstaffedOnly &&
-                    focusedTarget?.kind === 'day' &&
-                    focusedTarget.day !== day;
+                  const isSelectedCell =
+                    selectedTarget?.kind === 'cell' &&
+                    selectedTarget.day === day &&
+                    selectedTarget.hour === hour;
+                  const isSelectedDay =
+                    selectedTarget?.kind === 'day' && selectedTarget.day === day;
+                  const isDimmedByCoverageLens =
+                    highlightUnderstaffedOnly && !isActionable && !isSelectedCell;
 
                   return (
                     <td
@@ -610,34 +644,25 @@ export function AggregatedSummaryView({
                         cellRefs.current[cellKey] = el;
                       }}
                       className={`border-r border-slate-200 p-0 last:border-r-0 transition-opacity ${cellBg} ${
-                        isActivePeakCell || isFocusedTargetCell
+                        isSelectedCell
                           ? 'ring-2 ring-inset ring-indigo-600'
-                          : isFocusedTargetDay
+                          : isSelectedDay
                             ? 'ring-1 ring-inset ring-indigo-300/80'
                             : ''
-                      } ${
-                        isDimmedByCoverageLens
-                          ? 'opacity-35 hover:opacity-100'
-                          : isDimmedByDayFocus
-                            ? 'opacity-45 hover:opacity-100'
-                            : ''
-                      }`}
+                      } ${isDimmedByCoverageLens ? 'opacity-35 hover:opacity-100' : ''}`}
                     >
-                      {isActionable ? (
-                        <button
-                          type="button"
-                          onClick={() => onJumpToRosterCell(day, hour)}
-                          aria-label={`${DAY_LABELS[day]} ${formatHour24(hour)} ${
-                            isGap ? 'staffing gap' : 'high load'
-                          } — jump to Weekly Roster`}
-                          title="Click to inspect and fix this hour on Weekly Roster"
-                          className="w-full px-2 py-1.5 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-600"
-                        >
-                          {content}
-                        </button>
-                      ) : (
-                        <div className="px-2 py-1.5">{content}</div>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedTarget({ kind: 'cell', day, hour })}
+                        aria-pressed={isSelectedCell}
+                        aria-label={`${DAY_LABELS[day]} ${formatHour24(hour)}${
+                          isGap ? ' staffing gap' : isHighLoad ? ' high load' : ''
+                        } — inspect in chart`}
+                        title={`Click to inspect ${DAY_LABELS[day]} ${formatHour24(hour)} on chart`}
+                        className="w-full px-2 py-1.5 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-600"
+                      >
+                        {content}
+                      </button>
                     </td>
                   );
                 })}

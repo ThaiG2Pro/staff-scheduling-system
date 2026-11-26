@@ -150,25 +150,29 @@ describe('Slice 4: Schedule Health Bar & P0 Aggregated Summary 7x16 (AC-05)', ()
     expect(screen.getByRole('rowheader', { name: '07:00' })).toBeTruthy();
     expect(screen.getByRole('rowheader', { name: '22:00' })).toBeTruthy();
 
-    // Click a Gap cell -> jumps back to Weekly Roster with Focused banner
+    // Click a Gap cell -> highlights cell & opens chart (does NOT auto-jump to Roster)
     const mon07GapBtn = screen.getByRole('button', {
-      name: /Mon 07:00 staffing gap — jump to Weekly Roster/i,
+      name: /Mon 07:00 staffing gap — inspect in chart/i,
     });
     await user.click(mon07GapBtn);
+    expect(mon07GapBtn.getAttribute('aria-pressed')).toBe('true');
 
+    // Single contextual Roster CTA jumps back to Weekly Roster with Focused banner
+    await user.click(screen.getByRole('button', { name: /Fix Mon 07:00 on Roster/i }));
     expect(screen.getByText(/Focused from Hourly Summary:/i)).toBeTruthy();
     expect(screen.getByText(/Mon 07:00/i)).toBeTruthy();
 
-    // Return trip: Back to Summary highlights Mon 07:00, then Back to Roster returns
+    // Return trip: Back to Summary opens Mon 07:00 chart with From Weekly Roster badge, then single CTA returns
     await user.click(screen.getByRole('button', { name: /Back to Summary/i }));
-    expect(screen.getByText(/Returned from Weekly Roster:/i)).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: /Back to Roster/i }));
+    expect(screen.getByText(/From Weekly Roster/i)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: /Fix Mon 07:00 on Roster/i }));
     expect(screen.getByText(/Focused from Hourly Summary:/i)).toBeTruthy();
 
-    // Roster Day header -> inspects that day in Hourly Summary -> Back to Roster
+    // Roster Day header -> inspects that day in Hourly Summary -> single CTA returns to Roster
     await user.click(screen.getByRole('button', { name: /Inspect Sat in Hourly Summary/i }));
-    expect(screen.getByText(/Focused from Weekly Roster:/i)).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: /Back to Roster/i }));
+    expect(screen.getByText(/From Weekly Roster/i)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: /Open Sat on Roster/i }));
+    expect(screen.getByText(/Focused from Hourly Summary:/i)).toBeTruthy();
 
     // Run Auto-schedule and verify 1-click Undo Auto-schedule restores empty draft
     await user.click(screen.getByRole('button', { name: /Auto-schedule/i }));
@@ -356,5 +360,71 @@ describe('Phase 2: Inactive Roster Cells, Day-Off Guidance/Badge & UNAVAILABLE_D
     } finally {
       openSpy.mockRestore();
     }
+  });
+});
+
+describe('Daily Demand vs. Scheduled Chart in AggregatedSummaryView', () => {
+  it('stays closed until a Day column or Hour×Day cell is clicked, has no duplicate day bar, and uses a single contextual Roster CTA', async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        bootstrapState={makeNormalBootstrap()}
+        storeOptions={{ deps: createTestDeps(), getStorage: createMemoryStorage }}
+      />,
+    );
+
+    await user.click(screen.getAllByRole('button', { name: /Load Demo Store/i })[0]!);
+
+    // Open Hourly Summary directly -> chart is closed by default
+    await user.click(screen.getByRole('tab', { name: /Hourly Summary/i }));
+    expect(
+      screen.queryByRole('region', { name: /Daily demand vs\. scheduled chart/i }),
+    ).toBeNull();
+
+    // Click Tue column header in 7x16 table -> opens Tue chart (no duplicate 7-day bar inside chart)
+    const tueHeaderBtn = screen.getByRole('button', { name: /Inspect Tue chart/i });
+    expect(tueHeaderBtn.textContent).toMatch(/-\d+h/);
+    await user.click(tueHeaderBtn);
+
+    const chartRegion = screen.getByRole('region', {
+      name: /Daily demand vs\. scheduled chart/i,
+    });
+    expect(
+      within(chartRegion).queryByRole('group', {
+        name: /Select day for demand vs\. scheduled chart/i,
+      }),
+    ).toBeNull();
+    expect(
+      within(chartRegion).getByRole('img', {
+        name: /Tue hourly demand vs\. scheduled staff chart/i,
+      }),
+    ).toBeTruthy();
+    expect(
+      within(chartRegion).getByRole('button', { name: /Open Tue on Roster/i }),
+    ).toBeTruthy();
+
+    // Click an Hour×Day cell (Wed 12:00) -> switches chart to Wed, highlights cell, updates single CTA
+    const wed12Cell = screen.getByRole('button', { name: /Wed 12:00/i });
+    await user.click(wed12Cell);
+    expect(wed12Cell.getAttribute('aria-pressed')).toBe('true');
+    expect(
+      within(chartRegion).getByRole('img', {
+        name: /Wed hourly demand vs\. scheduled staff chart/i,
+      }),
+    ).toBeTruthy();
+    expect(
+      within(chartRegion).getByRole('button', { name: /Fix Wed 12:00 on Roster/i }),
+    ).toBeTruthy();
+
+    // Close chart -> collapses cleanly
+    await user.click(within(chartRegion).getByRole('button', { name: /Close daily demand chart/i }));
+    expect(
+      screen.queryByRole('region', { name: /Daily demand vs\. scheduled chart/i }),
+    ).toBeNull();
+
+    // Re-open via Fri header and jump explicitly to Roster via the single CTA
+    await user.click(screen.getByRole('button', { name: /Inspect Fri chart/i }));
+    await user.click(screen.getByRole('button', { name: /Open Fri on Roster/i }));
+    expect(screen.getByText(/Focused from Hourly Summary:/i)).toBeTruthy();
   });
 });

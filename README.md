@@ -55,21 +55,25 @@ pnpm run build && pnpm run bench:browser  # Measure browser scheduling speed (10
 Before finalizing the roster layout and auto-scheduler rules, I studied **Deputy**, **Legion**, and **7shifts** from a store manager's perspective—focusing on product documentation, help-center guides, and demo walkthroughs (Legion is enterprise-only with no self-service free trial)—by walking through four core weekly tasks:
 
 ### Manager Walkthrough (What Helped vs. What Got in the Way)
+
 - **Build next week's roster:** Legion's deterministic optimization translates demand curves directly into shifts via staffing ratios and scores roster quality with a live `Schedule Score`, while Deputy pairs `Auto-Build` / `Auto-Fill` with a `Stats Panel` right on the schedule page. However, both carry heavy upfront setup—roles, pay rates, labor-law rules, and multi-week POS history (e.g., 7shifts' `Optimal Labor Tool` requires 15 weeks of POS data; Legion is built around corporate-to-store enterprise pipelines)—which creates too much friction for a single store starting from a weekly CSV.
 - **Add cover for a busy Saturday:** Legion's `Staffing Guidance` (demand vs. scheduled coverage) and 7shifts' `Optimal Labor Tool` (hourly `(+)` / `(-)` variance grid directly beneath the roster) make peak shortfalls obvious at a glance, whereas scanning raw shift lists forces managers to mentally sum overlapping shifts.
 - **Replace someone who calls in sick:** Deputy's `RECOMMENDED` vs. `Not recommended` ranking inside the shift editor (and `Find replacement`) speeds up urgent swaps by surfacing conflicts and hours immediately. Most importantly, Deputy enforces constraints *asymmetrically*: rules like unavailability and hour limits act as strict filters during `Auto-Fill`, but become overridable soft warnings (`Roster anyway`) during manual emergency edits.
 - **Check nobody is over their hours:** Deputy and 7shifts show running weekly hour totals and overtime warnings directly on the schedule, but in a Staff × Day list a manager still has to scan down the roster or open a separate `Warnings` drawer to isolate who is overworked versus under-utilized.
 
 ### What I Adopted (and Why)
+
 - **Asymmetric guardrails (from Deputy):** Auto-schedule strictly respects `maxWeeklyHours`, 1 shift/day, and unavailable days, while manual edits treat hour caps and days off as **soft warnings** so a manager can still override them in an emergency without being locked out.
 - **Instant hourly coverage triage (from Legion & 7shifts):** I built **Coverage View** as an hourly required-vs-scheduled grid with a 3-tier shortage heatmap—bringing 7shifts/Legion-style hourly gap visibility to a single-week CSV with zero multi-month POS warm-up.
 - **Guided inline replacement & health summary (from Deputy & Legion):** Clicking any roster slot opens a **Quick-Assign** popover showing each person's remaining hours and day-off/same-day conflicts, paired with a top **Schedule Health Bar** inspired by Legion's `Schedule Score` so managers spot gaps, hour warnings, and fairness at a glance.
 
 ### What I Chose to Do Differently (and Why)
+
 - **Shift × Day matrix instead of Deputy's Area View / Team Member View:** Deputy lets managers toggle between `Area View` (by station/department) and `Team Member View` (Staff × Day). Because a small single-location store without complex departments first asks *"Is Saturday's morning or evening shift covered?"*, I made **Shift × Day** the primary grid and anchored a **Sticky Staff Panel** with one-click **KPI Lenses** (`Overworked`, `Under-utilized`, `Near Cap`) right beside it—keeping both coverage and per-person hour limits visible simultaneously without switching views.
 - **Zero-setup CSV workflow:** Instead of requiring pay-rate builders, POS connectors, or 6–15 weeks of historical data before auto-scheduling works, a manager can drop in one weekly CSV, adjust `N` (`txns / staff-hour`) live, and get a deterministic draft in milliseconds.
 
 ### Dogfooding on This App
+
 Running the same four manager tasks in my own build exposed two practical workflow snags that I fixed before submission: (1) when adding Saturday cover and checking conflicts, warning colors for *double-booked* shifts collided visually with *understaffed (`Need 2+`)* cues, so I separated the alert palette and added a dedicated **Legend bar**; and (2) when tweaking a draft and re-running Auto-schedule, locking key shifts one by one was tedious and wide screens let Sat/Sun drift out of view, so I locked the 7-day grid width and added **bulk Pin/Unpin** controls.
 
 ---
