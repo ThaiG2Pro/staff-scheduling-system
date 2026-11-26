@@ -2,30 +2,32 @@
 
 This web application helps store managers turn hourly transaction history into demand-aware, fair weekly schedules with live coverage feedback.
 
-- **Live Demo:** https://scheduler.thais.software
+- **Live Demo:** <https://scheduler.thais.software>
 - **Tech Stack:** React 19, TypeScript, Vite, Tailwind CSS, Vitest, Playwright
 
 ---
 
 ## 1. Quick Start
 
-> **Prerequisites:** You need Node.js (LTS) and `pnpm` (via `mise` or standalone) to run the project locally.
+> **Prerequisites:** You need [Node.js (LTS)](https://nodejs.org/en/download) and [`pnpm`](https://pnpm.io/installation) (via [`mise`](https://mise.jdx.dev/) or standalone) to run the project locally.
 
 ```bash
 pnpm install
 pnpm run dev
 ```
 
-You can open http://localhost:5173 in your browser to start planning immediately. The app saves all data locally in `localStorage`.
+You can open <http://localhost:5173> in your browser to start planning immediately. The app saves all data locally in `localStorage`.
 
 ### Try It in 30 Seconds (Demo Data or Sample CSVs)
 
-**Option A — One-Click Demo Store (Fastest)**
+### Option A — One-Click Demo Store (Fastest)
+
 1. Click **Load Demo Store** on the start screen. It pre-loads the default demand dataset (`docs/report_Transaction_20260807_20260813.csv`), the default 9-person team (`docs/sample_staff_demo.csv`), and two daily shifts (`07:00–15:00`, `15:00–23:00`).
 2. Click **Auto-schedule** to generate a balanced weekly roster in milliseconds.
 3. Open **Hourly Summary (7×16)** and click any day header or hour cell to inspect the **Daily Demand vs. Scheduled** chart.
 
-**Option B — Upload / Paste a Transaction CSV + Staff CSV Pair**
+### Option B — Upload / Paste a Transaction CSV + Staff CSV Pair
+
 1. Click **Create Schedule** (or open an existing schedule).
 2. **Load hourly demand:** Click **Import CSV** in the top bar and upload (or paste) any `7 days × 16 hours` transaction file from `docs/`:
    - `docs/report_Transaction_20260807_20260813.csv` — *Default Demo Store* (typical retail week, Fri–Thu export normalized to Mon–Sun).
@@ -42,7 +44,7 @@ You can open http://localhost:5173 in your browser to start planning immediately
 ```bash
 pnpm run typecheck                        # Verify TypeScript types (0 errors)
 pnpm test                                 # Run unit & UI integration tests (10 files, 73 tests)
-pnpm run test:coverage                    # Check test coverage (~90.6% stmts / ~90.1% branches)
+pnpm run test:coverage                    # Check test coverage (~90.7% stmts / ~89.5% branches)
 pnpm run build && pnpm run bench:browser  # Measure browser scheduling speed (100 runs/dataset)
 ```
 
@@ -55,7 +57,7 @@ pnpm run build && pnpm run bench:browser  # Measure browser scheduling speed (10
 - **Shift Active Days & Staff Availability:** Managers can choose which weekdays each shift runs and mark each staff member's unavailable days. When a manager removes a weekday from a shift, the app previews affected assignments and clears them only after confirmation.
 - **Hard Blocks vs. Soft Warnings:** The app blocks assignments on inactive shift days because those shifts do not operate on that day. In contrast, the app allows managers to override weekly hour caps or staff days off during emergencies, and it immediately flags those assignments with clear warning badges so nothing slips by unnoticed.
 - **Draft, Not Final (with Pinning & Undo):** Auto-schedule produces an editable starting draft rather than a locked plan. Managers can pin key assignments so future auto-schedule runs keep them intact, adjust any slot inline, or press `Ctrl+Z` to undo changes safely.
-- **Flexible CSV Import & Safe Local Storage:** The CSV importer handles messy real-world exports—including title banner rows and different weekday orders (the sample file runs `Fri–Thu` and normalizes automatically to `Mon–Sun`)—and it reports exact row and column errors for invalid files. The app persists schedules in `localStorage` for instant zero-backend setup, and it validates stored data with a recovery backup if a browser payload becomes corrupted.
+- **Flexible CSV Import & Safe Local Storage:** Both demand and team rosters support file upload or direct paste. The transaction CSV importer handles messy real-world exports—including title banner rows and different weekday orders (the sample file runs `Fri–Thu` and normalizes automatically to `Mon–Sun`)—while the staff CSV importer accepts flexible column headers (`name`, `max_weekly_hours`, `unavailable_days`) and can update existing staff in place without dropping current assignments. Both report exact row-level errors on invalid input. The app persists schedules in `localStorage` for instant zero-backend setup and validates stored data with a recovery backup if a browser payload becomes corrupted.
 
 ---
 
@@ -64,7 +66,7 @@ pnpm run build && pnpm run bench:browser  # Measure browser scheduling speed (10
 - **Weekly Roster (Shift × Day Matrix):** The main grid displays shifts as rows and weekdays (`Mon–Sun`) as columns so a non-technical manager sees shift coverage at a glance. Inactive shift cells appear disabled, assignments on staff days off show clear warning flags, and clicking any slot opens a **Quick-Assign** popover that shows each employee's remaining hours and conflicts.
 - **Sticky Staff Panel & KPI Lenses:** The side panel displays weekly hour utilization bars and day-off summaries for every team member. Managers can filter the team with one-click **KPI Lenses** (`All`, `Overworked`, `Under-utilized`, `Near Cap`) to spot staffing issues immediately.
 - **Schedule Health Bar:** The top workspace bar tracks four live health signals—`Staffing Gaps`, `Hour Limit Warnings`, `Demand Coverage`, and `Fairness`—so managers spot problems without scanning every table cell.
-- **Dual Hourly Summary (7×16):** Managers can switch between **Metrics View** (`Transactions`, `Staff Hours`, and `Txns / Staff Hour` with `–` for zero-staff hours, plus both weekly *overall* and *average* per-cell ratios) and **Coverage View** (required vs. scheduled headcount with a 3-tier red heatmap for shortages and badges for overstaffing).
+- **Dual Hourly Summary (7×16) & Daily Demand Chart:** Managers can switch between **Metrics View** (`Transactions`, `Staff Hours`, and `Txns / Staff Hour` with `–` for zero-staff hours, plus both weekly *overall* and *average* per-cell ratios) and **Coverage View** (required vs. scheduled headcount with a 3-tier red heatmap for shortages and badges for overstaffing). Clicking any day header or hour cell opens an on-demand **Daily Demand vs. Scheduled** SVG chart (`07:00–22:00`) synced two-way with the table and linked back to the Roster.
 - **Live Feedback:** Every manual edit immediately recalculates staff hour totals, warning badges, the Health Bar, and both Summary views.
 
 ---
@@ -83,7 +85,7 @@ Before finalizing the roster layout and auto-scheduler rules, I studied **Deputy
 ### What I Adopted (and Why)
 
 - **Asymmetric guardrails (from Deputy):** Auto-schedule strictly respects `maxWeeklyHours`, 1 shift/day, and unavailable days, while manual edits treat hour caps and days off as **soft warnings** so a manager can still override them in an emergency without being locked out.
-- **Instant hourly coverage triage (from Legion & 7shifts):** I built **Coverage View** as an hourly required-vs-scheduled grid with a 3-tier shortage heatmap—bringing 7shifts/Legion-style hourly gap visibility to a single-week CSV with zero multi-month POS warm-up.
+- **Instant hourly coverage triage (from Legion & 7shifts):** I built **Coverage View** as an hourly required-vs-scheduled grid with a 3-tier shortage heatmap—paired with an on-demand **Daily Demand vs. Scheduled** chart on click—bringing Legion `Staffing Guidance` and 7shifts `Optimal Labor Tool` visibility to a single-week CSV with zero multi-month POS warm-up.
 - **Guided inline replacement & health summary (from Deputy & Legion):** Clicking any roster slot opens a **Quick-Assign** popover showing each person's remaining hours and day-off/same-day conflicts, paired with a top **Schedule Health Bar** inspired by Legion's `Schedule Score` so managers spot gaps, hour warnings, and fairness at a glance.
 
 ### What I Chose to Do Differently (and Why)
@@ -100,9 +102,11 @@ Running the same four manager tasks in my own build exposed two practical workfl
 ## 5. Auto-Schedule Logic & Performance
 
 ### How We Define Fairness
+
 The scheduler measures fairness with **Jain's Fairness Index** on each eligible employee's **weekly utilization ratio** (`assignedHours / maxWeeklyHours`), rather than raw hours. Using utilization ratio ensures that a part-time worker (20h cap) and a full-time worker (40h cap) receive proportionally fair shares of work, while employees marked unavailable on all 7 days are excluded so they do not skew team fairness.
 
 ### Two-Stage Scheduling Logic
+
 Why two stages? Separating coverage from fairness ensures that the scheduler always covers busy store hours first and improves fairness second, without ever trading away store coverage for a small fairness gain. Every run is fully deterministic: identical inputs always produce the exact same schedule.
 
 1. **Stage 1 — Cover the Store First:**
@@ -114,8 +118,11 @@ Why two stages? Separating coverage from fairness ensures that the scheduler alw
    - It repeatedly tests moving a shift to another available person (`REASSIGN`) or swapping two shifts of different lengths (`SWAP`) whenever a move improves team fairness, and it stops once no further improvement exists.
 3. **Graceful Trade-offs:**
    - When store demand exceeds available staff hours, Stage 1 covers the busiest hours first and surfaces every remaining shortage clearly in **Coverage View** and the **Health Bar**. When staff capacity exceeds demand, the solver leaves extra capacity unused instead of overstaffing quiet hours.
+4. **Interactive Step-by-Step Replay (Optional):**
+   - Run `pnpm run dev:sim` to open the companion **Auto-Scheduler Simulator** and replay any live workspace schedule step by step through Stage 1 and Stage 2 (see `docs/07-algorithm-explained.md` for the full walkthrough).
 
 ### Browser Speed (Instant Manager Experience)
+
 The scheduler runs directly in the browser with no backend server, and it finishes well under `50 ms` so clicking **Auto-schedule** feels instant with zero loading spinner (measured across 100 runs in Chromium):
 
 | Store Size | Typical Time (Median) | Slowest Run (Max) |
@@ -139,9 +146,9 @@ I separated the pure scheduling and calculation logic (`src/domain/`) from React
 
 ## 7. AI Usage Note (§1)
 
-- **What I delegated to AI:** I used AI to scaffold TypeScript domain types, handle CSV parsing edge cases, set up Vitest and Playwright benchmark harnesses, and optimize internal Stage 2 loops (such as typed arrays and bitmasks) so larger stores run smoothly in the browser.
-- **What I verified myself:** I verified all summary arithmetic (especially *overall* vs. *average* `Txns / Staff Hour` and division-by-zero handling), hard scheduling rules (`maxWeeklyHours`, 1 shift/day, shift active days, staff unavailable days, and pin preservation), and browser speed through 53 passing automated tests (`~90.6%` coverage) and 100-run Chromium benchmarks.
+- **What I delegated to AI:** I used AI for bounded, verifiable execution: scaffolding TypeScript domain types and UI components from specs, implementing RFC 4180 transaction/staff CSV parsers, optimizing Stage 2 solver loops, generating unit/integration tests, Chromium benchmarks, sample stress-test CSVs (`weekend_rush`, `cafe_morning_peak`, `busy_store`), and building the standalone **Step-by-Step Simulator** (`tools/simulator`) kept decoupled from the pure solver.
+- **What I verified myself:** I never treated AI-generated scheduling logic or UI as a black box. I used the decoupled **Step-by-Step Simulator** to trace Stage 1 and Stage 2 decisions manually and catch subtle logic flaws, ran hands-on manual walkthroughs across all sample CSV scenarios to verify UX feel (rather than trusting AI-driven browser UI tests), and validated summary arithmetic, hard scheduling rules, and browser speed via 73 automated tests (`~90.7%` statement coverage) and 100-run Chromium benchmarks.
 - **Where I overrode AI suggestions:**
-  - I rejected a nested sub-header for `Metrics View | Coverage View` and moved the switch into the main tab bar to save vertical space for the 16-hour grid.
-  - I replaced flat red shortage highlights with a 3-tier severity heatmap so managers triage peak-hour deficits faster.
-  - I replaced brittle automated E2E walkthrough scripts with targeted unit/integration tests and hands-on manual manager walkthroughs (`M-01..M-10`) to validate real interaction feel.
+  - **Rejected automated AI UI/E2E sign-off:** I refused to let AI validate UI/UX through brittle browser-tool scripts; instead, I tested every manager flow manually, identified visual and workflow snags (alert color collisions, nested summary headers, flat shortage highlights, Sat/Sun scroll drift), and directed targeted fixes.
+  - **Enforced architectural boundaries & modularity:** I required the Simulator and trace layer to stay cleanly isolated from `src/domain/` and `localStorage`, broke up overgrown solver modules into small focused files, and enforced clean, scoped conventional commits throughout.
+  - **Simplified on-demand chart & summary UX:** I rejected a cluttered nested sub-header and always-open chart layout in favor of a unified `Metrics View | Coverage View` tab bar, a 3-tier shortage heatmap, and an on-demand **Daily Demand vs. Scheduled** chart triggered directly from the 7×16 table.
