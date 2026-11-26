@@ -10,6 +10,7 @@ import {
   snapshotTraceAssignments,
   snapshotTraceEntities,
   snapshotTraceGrid,
+  snapshotTraceShifts,
   type SchedulerTraceObserver,
   type TraceAssignmentSnapshot,
 } from './schedulerTrace';
@@ -56,6 +57,7 @@ export function emitInputReadinessTrace(
       { key: 'eligibleStaff', label: 'Nhân viên hợp lệ', value: readiness.eligibleStaff.length, unit: 'người' },
       { key: 'shiftTemplates', label: 'Mẫu ca', value: input.shifts.length, unit: 'ca' },
     ],
+    shifts: snapshotTraceShifts(input.shifts),
     debugPayload: {
       eligibleStaffIds: readiness.eligibleStaff.map((s) => s.id),
       shiftIds: input.shifts.map((sh) => sh.id),
@@ -192,6 +194,7 @@ export function buildPinnedSnapshots(
         day: p.day,
         staffId: p.staffId,
         staffName: staffNameById.get(p.staffId) ?? p.staffId,
+        shiftId: p.shiftId,
         shiftLabel: `${pad(sh.startHour)}–${pad(sh.endHour)}h`,
         startHour: sh.startHour,
         endHour: sh.endHour,

@@ -4,7 +4,7 @@
  * and CSV/action notices.
  */
 
-import { AlertTriangle, CheckCircle2, RotateCcw, Sparkles, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, PlayCircle, RotateCcw, Sparkles, X } from 'lucide-react';
 import type { AutoScheduleDiagnostics, PinConflict } from '../../domain/types';
 
 export type WorkspaceBannerState =
@@ -34,6 +34,8 @@ export interface ContextualBannersProps {
   onHighlightPinConflicts: (assignmentIds: string[]) => void;
   onKeepDraft: () => void;
   onDismiss: () => void;
+  canReplayLastRun?: boolean;
+  onReplayLastRun?: () => void;
 }
 
 /**
@@ -50,6 +52,8 @@ export function ContextualBanners({
   onHighlightPinConflicts,
   onKeepDraft,
   onDismiss,
+  canReplayLastRun,
+  onReplayLastRun,
 }: ContextualBannersProps) {
   if (!banner) return null;
 
@@ -93,6 +97,16 @@ export function ContextualBanners({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {canReplayLastRun && onReplayLastRun && (
+              <button
+                type="button"
+                onClick={onReplayLastRun}
+                className="inline-flex items-center gap-1 rounded-lg border border-sky-300 bg-white px-3 py-1.5 text-xs font-semibold text-sky-900 hover:bg-sky-100"
+              >
+                <PlayCircle className="h-3.5 w-3.5" aria-hidden="true" />
+                Watch step-by-step
+              </button>
+            )}
             {canUndoAutoSchedule && (
               <button
                 type="button"
@@ -142,7 +156,17 @@ export function ContextualBanners({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {canReplayLastRun && onReplayLastRun && (
+              <button
+                type="button"
+                onClick={onReplayLastRun}
+                className="inline-flex items-center gap-1 rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-medium text-rose-800 hover:bg-rose-100"
+              >
+                <PlayCircle className="h-3.5 w-3.5" aria-hidden="true" />
+                Watch in Simulator
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onHighlightPinConflicts(allConflictIds)}

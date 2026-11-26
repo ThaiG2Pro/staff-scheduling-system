@@ -6,7 +6,7 @@
  */
 
 import { computeJainFromSums, type SchedulerWorkingState } from './schedulerState';
-import type { DayOfWeek } from './types';
+import type { DayOfWeek, ShiftTemplate } from './types';
 
 export const TRACE_SCHEMA_VERSION = 1 as const;
 
@@ -42,10 +42,19 @@ export interface TraceGridSnapshot {
   readonly highlightCells?: readonly number[];
 }
 
+export interface TraceShiftSnapshot {
+  readonly id: string;
+  readonly label: string;
+  readonly startHour: number;
+  readonly endHour: number;
+  readonly daysOfWeek?: readonly DayOfWeek[];
+}
+
 export interface TraceAssignmentSnapshot {
   readonly day: DayOfWeek;
   readonly staffId: string;
   readonly staffName: string;
+  readonly shiftId?: string;
   readonly shiftLabel: string;
   readonly startHour: number;
   readonly endHour: number;
@@ -91,6 +100,7 @@ export interface TraceEvent {
   readonly ruleHint?: TraceRuleHint;
   readonly metrics: readonly TraceMetric[];
   readonly grid?: TraceGridSnapshot;
+  readonly shifts?: readonly TraceShiftSnapshot[];
   readonly entities?: readonly TraceEntitySnapshot[];
   readonly assignments?: readonly TraceAssignmentSnapshot[];
   readonly removedAssignments?: readonly TraceAssignmentSnapshot[];
@@ -209,6 +219,20 @@ export function snapshotTraceGrid(
   };
 }
 
+/** Pure helper snapshotting shift templates for immutable time-travel roster rendering. */
+export function snapshotTraceShifts(
+  shifts: readonly Readonly<ShiftTemplate>[],
+): readonly TraceShiftSnapshot[] {
+  const pad = (h: number) => String(h).padStart(2, '0');
+  return shifts.map((sh) => ({
+    id: sh.id,
+    label: `${pad(sh.startHour)}–${pad(sh.endHour)}h`,
+    startHour: sh.startHour,
+    endHour: sh.endHour,
+    ...(sh.daysOfWeek ? { daysOfWeek: [...sh.daysOfWeek] } : {}),
+  }));
+}
+
 /** Pure helper building a live roster snapshot (pinned + workingNew) for immutable time-travel. */
 export function snapshotTraceAssignments(
   state: SchedulerWorkingState,
@@ -226,6 +250,7 @@ export function snapshotTraceAssignments(
       day: w.day,
       staffId: staff.id,
       staffName: staff.name,
+      shiftId: w.shiftId,
       shiftLabel: `${pad(w.startHour)}–${pad(w.endHour)}h`,
       startHour: w.startHour,
       endHour: w.endHour,

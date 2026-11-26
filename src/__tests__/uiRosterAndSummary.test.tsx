@@ -5,7 +5,7 @@
  * and P0 AggregatedSummaryView 7x16 with 1-click jump).
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from '../App';
@@ -298,5 +298,63 @@ describe('Phase 2: Inactive Roster Cells, Day-Off Guidance/Badge & UNAVAILABLE_D
     await user.click(screen.getByRole('button', { name: /^Auto-schedule$/i }));
     const diffNewBadges = screen.getAllByText(/^New$/);
     expect(diffNewBadges.length).toBe(1);
+  });
+
+  it('shows Simulator replay buttons after Auto-schedule and posts the captured pre-run snapshot', async () => {
+    const user = userEvent.setup();
+    const postMessage = vi.fn();
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue({
+      postMessage,
+      focus: vi.fn(),
+    } as unknown as Window);
+
+    try {
+      render(
+        <App
+          bootstrapState={makeNormalBootstrap()}
+          storeOptions={{ deps: createTestDeps(), getStorage: createMemoryStorage }}
+        />,
+      );
+
+      // Load Demo Store (starts with 0 assignments)
+      await user.click(screen.getAllByRole('button', { name: /Load Demo Store/i })[0]!);
+
+      // Before running Auto-schedule, Replay sim button is not rendered
+      expect(screen.queryByRole('button', { name: /Replay sim/i })).toBeNull();
+
+      // Run Auto-schedule
+      await user.click(screen.getByRole('button', { name: /^Auto-schedule$/i }));
+
+      // Both banner CTA ("Watch step-by-step") and TopActionBar CTA ("Replay sim") appear
+      const watchBtn = screen.getByRole('button', { name: /Watch step-by-step/i });
+      const replayBtn = screen.getByRole('button', { name: /Replay sim/i });
+      expect(watchBtn).toBeTruthy();
+      expect(replayBtn).toBeTruthy();
+
+      // Click "Watch step-by-step" -> opens Simulator and sends the pre-run snapshot (0 assignments)
+      await user.click(watchBtn);
+      expect(openSpy).toHaveBeenCalledWith('http://localhost:5174', 'staff-scheduler-sim');
+      expect(postMessage).toHaveBeenCalledTimes(1);
+
+      const [message, targetOrigin] = postMessage.mock.calls[0] as [
+        { type: string; payload: { protocolVersion: number; resultStatus: string; schedule: { assignments: unknown[] } } },
+        string,
+      ];
+      expect(targetOrigin).toBe('http://localhost:5174');
+      expect(message.type).toBe('SIMULATOR_LOAD_SCHEDULE');
+      expect(message.payload.protocolVersion).toBe(1);
+      expect(message.payload.resultStatus).toBe('SUCCESS');
+      expect(message.payload.schedule.assignments).toHaveLength(0);
+
+      // Acknowledge so timer cleans up cleanly
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          origin: 'http://localhost:5174',
+          data: { type: 'SIMULATOR_LOAD_ACK', protocolVersion: 1 },
+        }),
+      );
+    } finally {
+      openSpy.mockRestore();
+    }
   });
 });

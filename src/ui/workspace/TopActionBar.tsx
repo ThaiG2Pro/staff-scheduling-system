@@ -13,6 +13,7 @@ import {
   Lock,
   Minus,
   MoreHorizontal,
+  PlayCircle,
   Plus,
   Sparkles,
   Trash2,
@@ -35,6 +36,8 @@ export interface TopActionBarProps {
   onOpenManageShifts: () => void;
   onRunAutoSchedule: () => void;
   onRequestDeleteSchedule: () => void;
+  hasLastAutoRun?: boolean;
+  onReplayLastAutoRun?: () => void;
 }
 
 const MISSING_INPUT_LABELS: Record<MissingInputCode, string> = {
@@ -63,6 +66,8 @@ export function TopActionBar({
   onOpenManageShifts,
   onRunAutoSchedule,
   onRequestDeleteSchedule,
+  hasLastAutoRun,
+  onReplayLastAutoRun,
 }: TopActionBarProps) {
   const [nameDraft, setNameDraft] = useState(scheduleName);
   const [nameError, setNameError] = useState<string | null>(null);
@@ -299,6 +304,18 @@ export function TopActionBar({
             <Sparkles className="h-4 w-4" aria-hidden="true" />
             Auto-schedule
           </button>
+
+          {hasLastAutoRun && onReplayLastAutoRun && (
+            <button
+              type="button"
+              onClick={onReplayLastAutoRun}
+              title="Replay last Auto-schedule run step-by-step in Simulator"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs font-semibold text-indigo-800 hover:bg-indigo-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
+            >
+              <PlayCircle className="h-3.5 w-3.5" aria-hidden="true" />
+              Replay sim
+            </button>
+          )}
 
           {/* More menu with Delete Schedule */}
           <div className="relative" ref={moreRef}>

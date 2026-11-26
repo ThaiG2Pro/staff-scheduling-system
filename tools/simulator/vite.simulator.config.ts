@@ -6,7 +6,8 @@ import tailwindcss from '@tailwindcss/vite';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  base: command === 'build' ? '/sim/' : '/',
   root: __dirname,
   plugins: [react(), tailwindcss()],
   server: {
@@ -16,7 +17,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: path.resolve(__dirname, 'dist'),
+    outDir: path.resolve(__dirname, '../../dist/sim'),
     emptyOutDir: true,
   },
-});
+}));

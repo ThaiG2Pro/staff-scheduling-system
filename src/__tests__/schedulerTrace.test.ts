@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { runAutoSchedule } from '../domain/autoScheduler';
 import { createDemoStoreSchedule } from '../domain/demoData';
-import type { SchedulerTraceObserver, TraceEvent } from '../domain/schedulerTrace';
+import {
+  snapshotTraceShifts,
+  type SchedulerTraceObserver,
+  type TraceEvent,
+} from '../domain/schedulerTrace';
 import type { AutoScheduleInput, DayOfWeek } from '../domain/types';
 
 function makeDeterministicIdGen(prefix: string): () => string {
@@ -129,5 +133,76 @@ describe('Scheduler Trace Protocol — Determinism & Non-Interference Invariant'
     const constrainedEntity = stage1Steps[0]!.entities?.find((e) => e.id === staffWithUnavail[0]!.id);
     expect(constrainedEntity?.availableDaysCount).toBe(2);
     expect(constrainedEntity?.unavailableDays).toEqual([0, 1, 2, 3, 4]);
+
+    // Stage 0 readiness.ok event emits TraceShiftSnapshot[] preserving daysOfWeek
+    const readinessEvent = events.find((e) => e.kind === 'input_gate' && e.status === 'ok');
+    expect(readinessEvent?.shifts).toHaveLength(shiftsWithDays.length);
+    const constrainedShiftSnap = readinessEvent?.shifts?.find((s) => s.id === shiftsWithDays[0]!.id);
+    expect(constrainedShiftSnap?.daysOfWeek).toEqual([0, 1, 2, 3, 4]);
+    const unconstrainedShiftSnap = readinessEvent?.shifts?.find((s) => s.id === shiftsWithDays[1]!.id);
+    expect(unconstrainedShiftSnap?.daysOfWeek).toBeUndefined();
+  });
+
+  it('emits shifts snapshot and shiftId on pinned, generated, and removed trace assignments', () => {
+    const base = buildDemoInput();
+    const staff0 = base.staff[0]!;
+    const shift0 = base.shifts[0]!;
+    const pinnedInput = buildDemoInput({
+      existingAssignments: [
+        { id: 'pin-trace-1', day: 0, shiftId: shift0.id, staffId: staff0.id, isPinned: true },
+      ],
+    });
+
+    const events: Omit<TraceEvent, 'seq'>[] = [];
+    const observer: SchedulerTraceObserver = { emit: (e) => events.push(e) };
+    const result = runAutoSchedule(pinnedInput, { observer });
+    expect(result.status).toBe('SUCCESS');
+
+    const shiftIds = new Set(pinnedInput.shifts.map((sh) => sh.id));
+
+    // Readiness event includes full shifts snapshot
+    const readiness = events.find((e) => e.kind === 'input_gate' && e.status === 'ok');
+    expect(readiness?.shifts).toBeDefined();
+    expect(readiness?.shifts?.map((s) => s.id)).toEqual(pinnedInput.shifts.map((s) => s.id));
+
+    // Output event assignments all carry valid shiftId (both pinned and generated)
+    const outputEvent = events.find((e) => e.kind === 'output');
+    expect(outputEvent?.assignments).toBeDefined();
+    expect(outputEvent!.assignments!.length).toBeGreaterThan(1);
+
+    const pinnedSnap = outputEvent!.assignments!.find((a) => a.isPinned);
+    expect(pinnedSnap?.shiftId).toBe(shift0.id);
+
+    for (const a of outputEvent!.assignments!) {
+      expect(a.shiftId).toBeTypeOf('string');
+      expect(shiftIds.has(a.shiftId!)).toBe(true);
+    }
+
+    // Any removedAssignments in Stage 2 also carry valid shiftId
+    for (const ev of events) {
+      if (ev.removedAssignments) {
+        for (const rem of ev.removedAssignments) {
+          expect(rem.shiftId).toBeTypeOf('string');
+          expect(shiftIds.has(rem.shiftId!)).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('snapshotTraceShifts formats labels and clones daysOfWeek immutably', () => {
+    const days: DayOfWeek[] = [0, 2, 4];
+    const snaps = snapshotTraceShifts([
+      { id: 'sh-1', startHour: 7, endHour: 13, daysOfWeek: days },
+      { id: 'sh-2', startHour: 14, endHour: 22 },
+    ]);
+
+    expect(snaps).toEqual([
+      { id: 'sh-1', label: '07–13h', startHour: 7, endHour: 13, daysOfWeek: [0, 2, 4] },
+      { id: 'sh-2', label: '14–22h', startHour: 14, endHour: 22 },
+    ]);
+
+    // Mutating original array does not affect snapshot
+    days.push(6);
+    expect(snaps[0]!.daysOfWeek).toEqual([0, 2, 4]);
   });
 });

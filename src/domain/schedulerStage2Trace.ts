@@ -59,6 +59,7 @@ function toRemovedGhostPill(
     day: a.day,
     staffId: staff.id,
     staffName: staff.name,
+    shiftId: a.shiftId,
     shiftLabel: `${pad(a.startHour)}–${pad(a.endHour)}h`,
     startHour: a.startHour,
     endHour: a.endHour,

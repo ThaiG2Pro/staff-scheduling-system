@@ -11,9 +11,15 @@ import {
   Wrench,
 } from 'lucide-react';
 import type { TraceRun } from '../../../../src/domain/schedulerTrace';
+import {
+  SIMULATOR_BRIDGE_PROTOCOL_VERSION,
+  SIMULATOR_SESSION_STORAGE_KEY,
+  isValidSimulatorScheduleSnapshot,
+  type SimulatorScheduleSnapshot,
+} from '../../../../src/ui/common/simulatorBridge';
 import { SIMULATOR_ALGORITHM_REF } from '../algorithmRef';
 import type { ScenarioPresetId } from '../runner/scenarioPresets';
-import { runSimulationScenario } from '../runner/scenarioRunner';
+import { runSimulationFromSchedule, runSimulationScenario } from '../runner/scenarioRunner';
 import { parseTraceRunJson } from '../runner/traceCollector';
 import { usePlayback } from '../state/usePlayback';
 import { DecisionPanel } from './DecisionPanel';
@@ -29,9 +35,25 @@ import { StaffBars } from './StaffBars';
 type ViewLens = 'manager' | 'debug';
 type CanvasTab = 'heatmap' | 'roster' | 'pipeline';
 
+function loadInitialLiveSnapshot(): SimulatorScheduleSnapshot | null {
+  try {
+    const raw = window.sessionStorage.getItem(SIMULATOR_SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return isValidSimulatorScheduleSnapshot(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export function SimulatorApp() {
+  const [liveSnapshot, setLiveSnapshot] = useState<SimulatorScheduleSnapshot | null>(() =>
+    loadInitialLiveSnapshot(),
+  );
   const [presetId, setPresetId] = useState<ScenarioPresetId>('demo_store');
-  const [targetN, setTargetN] = useState<number>(15);
+  const [targetN, setTargetN] = useState<number>(
+    () => liveSnapshot?.schedule.targetTxnsPerStaffHour ?? 15,
+  );
   const [lens, setLens] = useState<ViewLens>('manager');
   const [activeTab, setActiveTab] = useState<CanvasTab>('heatmap');
   const [customCsv, setCustomCsv] = useState<{ name: string; text: string } | null>(null);
@@ -41,17 +63,88 @@ export function SimulatorApp() {
   const csvInputRef = useRef<HTMLInputElement>(null);
   const traceInputRef = useRef<HTMLInputElement>(null);
 
-  const safeTargetN = Number.isFinite(targetN) && targetN > 0 ? targetN : 15;
+  const clearLiveSnapshot = () => {
+    setLiveSnapshot(null);
+    try {
+      window.sessionStorage.removeItem(SIMULATOR_SESSION_STORAGE_KEY);
+    } catch {
+      // Ignore storage restrictions
+    }
+  };
+
+  // Web Scheduler → Simulator live bridge (postMessage handshake)
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: unknown; payload?: unknown } | null;
+      if (!data || typeof data !== 'object') return;
+      if (data.type !== 'SIMULATOR_LOAD_SCHEDULE') return;
+      if (!isValidSimulatorScheduleSnapshot(data.payload)) return;
+
+      const snapshot = data.payload;
+      try {
+        window.sessionStorage.setItem(SIMULATOR_SESSION_STORAGE_KEY, JSON.stringify(snapshot));
+      } catch {
+        // Continue in memory even if sessionStorage is unavailable
+      }
+
+      setLiveSnapshot(snapshot);
+      setImportedRun(null);
+      setCustomCsv(null);
+      setBannerError(null);
+      setTargetN(snapshot.schedule.targetTxnsPerStaffHour);
+
+      try {
+        const sourceWin = event.source as Window | null;
+        if (sourceWin && typeof sourceWin.postMessage === 'function') {
+          const replyOrigin =
+            event.origin && event.origin !== 'null' ? event.origin : '*';
+          sourceWin.postMessage(
+            {
+              type: 'SIMULATOR_LOAD_ACK',
+              protocolVersion: SIMULATOR_BRIDGE_PROTOCOL_VERSION,
+            },
+            replyOrigin,
+          );
+        }
+      } catch {
+        // Ignore cross-origin ack errors
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    try {
+      const openerWin = window.opener as Window | null;
+      if (openerWin && !openerWin.closed) {
+        openerWin.postMessage(
+          {
+            type: 'SIMULATOR_READY',
+            protocolVersion: SIMULATOR_BRIDGE_PROTOCOL_VERSION,
+          },
+          '*',
+        );
+      }
+    } catch {
+      // Ignore cross-origin opener errors
+    }
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+    };
+  }, []);
+
+  const safeTargetN = Number.isFinite(targetN) && targetN >= 1 && targetN <= 500 ? targetN : 15;
 
   const computedRun = useMemo(() => {
     if (importedRun) return importedRun;
+    if (liveSnapshot) return runSimulationFromSchedule(liveSnapshot.schedule, safeTargetN);
     return runSimulationScenario({
       presetId,
       targetN: safeTargetN,
       customCsvText: customCsv?.text,
       customCsvFileName: customCsv?.name,
     });
-  }, [importedRun, presetId, safeTargetN, customCsv]);
+  }, [importedRun, liveSnapshot, presetId, safeTargetN, customCsv]);
 
   const controls = usePlayback(computedRun);
 
@@ -68,6 +161,14 @@ export function SimulatorApp() {
     for (let i = controls.currentIndex; i >= 0; i--) {
       const ents = computedRun.events[i]?.entities;
       if (ents) return ents;
+    }
+    return null;
+  }, [computedRun.events, controls.currentIndex]);
+
+  const activeShifts = useMemo(() => {
+    for (let i = controls.currentIndex; i >= 0; i--) {
+      const sh = computedRun.events[i]?.shifts;
+      if (sh) return sh;
     }
     return null;
   }, [computedRun.events, controls.currentIndex]);
@@ -113,6 +214,7 @@ export function SimulatorApp() {
   const handleUploadCsv = async (file: File) => {
     setBannerError(null);
     const text = await file.text();
+    clearLiveSnapshot();
     setImportedRun(null);
     setPresetId('demo_store');
     setCustomCsv({ name: file.name, text });
@@ -126,6 +228,7 @@ export function SimulatorApp() {
       setBannerError(parsed.error);
       return;
     }
+    clearLiveSnapshot();
     setImportedRun(parsed.run);
   };
 
@@ -171,6 +274,7 @@ export function SimulatorApp() {
             <ScenarioPicker
               value={presetId}
               onChange={(preset) => {
+                clearLiveSnapshot();
                 setImportedRun(null);
                 setCustomCsv(null);
                 setBannerError(null);
@@ -184,14 +288,14 @@ export function SimulatorApp() {
               <input
                 type="number"
                 min={1}
-                max={200}
-                step={1}
+                max={500}
+                step="any"
                 value={targetN}
                 onChange={(e) => {
                   setImportedRun(null);
                   setTargetN(Number(e.target.value));
                 }}
-                className="w-12 font-mono font-semibold text-slate-900 focus:outline-none"
+                className="w-16 font-mono font-semibold text-slate-900 focus:outline-none"
               />
             </label>
 
@@ -296,6 +400,44 @@ export function SimulatorApp() {
           </div>
         )}
 
+        {liveSnapshot && !importedRun && (
+          <div
+            role="status"
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs text-emerald-950"
+          >
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span>
+                Đang phát lại từ Web Scheduler:{' '}
+                <strong>{liveSnapshot.schedule.name}</strong>
+              </span>
+              <span className="text-emerald-800">
+                Chụp lúc: <strong>{new Date(liveSnapshot.capturedAtIso).toLocaleTimeString()}</strong>
+              </span>
+              <span className="text-emerald-800">
+                N gốc: <strong>{liveSnapshot.schedule.targetTxnsPerStaffHour}</strong>
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              {safeTargetN !== liveSnapshot.schedule.targetTxnsPerStaffHour && (
+                <button
+                  type="button"
+                  onClick={() => setTargetN(liveSnapshot.schedule.targetTxnsPerStaffHour)}
+                  className="font-semibold text-emerald-900 underline hover:text-emerald-700"
+                >
+                  Khôi phục N gốc
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={clearLiveSnapshot}
+                className="font-semibold text-emerald-900 underline hover:text-emerald-700"
+              >
+                Quay lại kịch bản mẫu
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* TOP ROW (2 Regions): Playback Bar + Metrics & Progression Chart */}
         <div className="grid grid-cols-1 items-stretch gap-3 xl:grid-cols-12">
           <div className="xl:col-span-7">
@@ -364,6 +506,7 @@ export function SimulatorApp() {
                 {activeTab === 'roster' && (
                   <RosterTable
                     entities={activeEntities}
+                    shifts={activeShifts}
                     assignments={activeAssignments}
                     removedAssignments={currentEvent?.removedAssignments}
                   />

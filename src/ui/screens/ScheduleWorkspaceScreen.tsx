@@ -29,6 +29,11 @@ import type {
 import type { ScheduleStore } from '../../state/useScheduleStore';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { formatTimestamp } from '../common/formatters';
+import {
+  SIMULATOR_BRIDGE_PROTOCOL_VERSION,
+  openScheduleInSimulator,
+  type SimulatorScheduleSnapshot,
+} from '../common/simulatorBridge';
 import { CsvImportModal } from '../panels/CsvImportModal';
 import { ManageShiftsModal } from '../panels/ManageShiftsModal';
 import { StaffFormModal } from '../panels/StaffFormModal';
@@ -87,6 +92,7 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
 
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
   const [toastLabel, setToastLabel] = useState<string | null>(null);
+  const [lastAutoRuns, setLastAutoRuns] = useState<Record<string, SimulatorScheduleSnapshot>>({});
 
   const [csvModalOpen, setCsvModalOpen] = useState(false);
   const [shiftsModalOpen, setShiftsModalOpen] = useState(false);
@@ -251,6 +257,11 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
   }, [undoStack.length, performUndo, activeKpiLens, focusedSummaryTarget]);
 
   const handleRunAutoSchedule = () => {
+    const clonedSchedule: Schedule =
+      typeof structuredClone === 'function'
+        ? structuredClone(schedule)
+        : (JSON.parse(JSON.stringify(schedule)) as Schedule);
+
     const assignmentSlotKey = (a: { day: number; shiftId: string; staffId: string }) =>
       `${a.day}:${a.shiftId}:${a.staffId}`;
     const beforeSnapshot = schedule.assignments.map((a) => ({ ...a }));
@@ -264,6 +275,19 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
 
     const actionRes = store.runAutoScheduleForSchedule(schedule.id);
     const result: AutoScheduleResult = actionRes.result;
+
+    if (result.status === 'SUCCESS' || result.status === 'BLOCKED_PIN_CONFLICT') {
+      const capturedSnapshot: SimulatorScheduleSnapshot = {
+        protocolVersion: SIMULATOR_BRIDGE_PROTOCOL_VERSION,
+        capturedAtIso: new Date().toISOString(),
+        resultStatus: result.status,
+        schedule: clonedSchedule,
+      };
+      setLastAutoRuns((prev) => ({
+        ...prev,
+        [schedule.id]: capturedSnapshot,
+      }));
+    }
 
     if (result.status === 'SUCCESS') {
       const addedIds = new Set(
@@ -305,6 +329,34 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
       tone: 'warning',
       title: result.message,
     });
+  };
+
+  const handleReplayLastAutoRun = () => {
+    const snapshot = lastAutoRuns[schedule.id];
+    if (!snapshot) return;
+
+    const res = openScheduleInSimulator(snapshot, {
+      onUnavailable: (url) => {
+        setBanner({
+          kind: 'notice',
+          tone: 'warning',
+          title: `Simulator is not responding at ${url}`,
+          details: [
+            import.meta.env.DEV
+              ? 'Start the simulator in a terminal with: pnpm run dev:sim'
+              : 'Please refresh the Simulator tab or try again.',
+          ],
+        });
+      },
+    });
+
+    if (!res.ok) {
+      setBanner({
+        kind: 'notice',
+        tone: 'warning',
+        title: res.error,
+      });
+    }
   };
 
   const handleRequestDeleteStaff = (member: Staff) => {
@@ -463,6 +515,8 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
         onOpenManageShifts={() => setShiftsModalOpen(true)}
         onRunAutoSchedule={handleRunAutoSchedule}
         onRequestDeleteSchedule={() => setDeleteScheduleOpen(true)}
+        hasLastAutoRun={Boolean(lastAutoRuns[schedule.id])}
+        onReplayLastAutoRun={handleReplayLastAutoRun}
       />
 
       <main className="mx-auto w-full max-w-[1680px] space-y-3.5 px-4 py-4 sm:px-5">
@@ -516,6 +570,8 @@ export function ScheduleWorkspaceScreen({ store, schedule }: ScheduleWorkspaceSc
             setConflictAssignmentIds(new Set());
             setBanner(null);
           }}
+          canReplayLastRun={Boolean(lastAutoRuns[schedule.id])}
+          onReplayLastRun={handleReplayLastAutoRun}
         />
 
         {/* Responsive Split Workspace: stacks cleanly below lg, side-by-side on desktop */}

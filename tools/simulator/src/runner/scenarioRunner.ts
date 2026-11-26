@@ -1,4 +1,5 @@
 import { runAutoSchedule } from '../../../../src/domain/autoScheduler';
+import { DAYS_OF_WEEK, OPERATING_HOURS } from '../../../../src/domain/constants';
 import { parseCsvTransactions } from '../../../../src/domain/csvParser';
 import { createDemoStoreSchedule, DEMO_STORE_CSV_TEXT } from '../../../../src/domain/demoData';
 import type { TraceRun } from '../../../../src/domain/schedulerTrace';
@@ -315,6 +316,163 @@ export function runSimulationScenario(params: RunScenarioParams): TraceRun {
 
   return collector.build(
     `${params.presetId} (N=${params.targetN})`,
+    solverResult.status === 'BLOCKED_PIN_CONFLICT' ? 'BLOCKED' : 'FAILED',
+  );
+}
+
+/**
+ * Replays an exact Schedule snapshot captured from the Web Scheduler
+ * through the deterministic Auto-Scheduler with full step-by-step tracing.
+ */
+export function runSimulationFromSchedule(
+  schedule: Schedule,
+  targetNOverride?: number,
+): TraceRun {
+  const collector = new TraceCollector();
+  const sandbox = new SandboxStorage();
+
+  const effectiveN =
+    targetNOverride !== undefined && Number.isFinite(targetNOverride) && targetNOverride > 0
+      ? targetNOverride
+      : schedule.targetTxnsPerStaffHour;
+
+  const initialSchedule: Schedule = {
+    ...schedule,
+    targetTxnsPerStaffHour: effectiveN,
+  };
+
+  const pinnedCount = initialSchedule.assignments.filter((a) => a.isPinned).length;
+
+  const initialPersisted: PersistedAppState = {
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    activeScheduleId: initialSchedule.id,
+    schedules: [initialSchedule],
+  };
+  sandbox.setItem(PRIMARY_STORAGE_KEY, JSON.stringify(initialPersisted));
+
+  // Step 0A: Hydrate real Web Scheduler snapshot inside Sandbox Storage
+  const hydrated = loadState(() => sandbox);
+  collector.emit({
+    stageId: 'stage_storage',
+    stageLabel: 'Lưu trữ (Storage I/O)',
+    kind: 'storage_io',
+    status: 'ok',
+    title: `Nạp lịch thật từ Web Scheduler: "${initialSchedule.name}"`,
+    narrative: `Đã nạp bản chụp lịch làm việc "${initialSchedule.name}" vào Sandbox (schemaVersion: ${hydrated.state.schemaVersion}) với ${initialSchedule.staff.length} nhân viên, ${initialSchedule.shifts.length} mẫu ca và ${pinnedCount} ca ghim sẵn.`,
+    metrics: [
+      { key: 'staffCount', label: 'Nhân viên', value: initialSchedule.staff.length, unit: 'người' },
+      { key: 'shiftsCount', label: 'Mẫu ca', value: initialSchedule.shifts.length, unit: 'ca' },
+      { key: 'pinnedCount', label: 'Ca ghim sẵn', value: pinnedCount, unit: 'ca' },
+    ],
+    debugPayload: {
+      source: 'web_scheduler_bridge',
+      scheduleId: initialSchedule.id,
+      scheduleName: initialSchedule.name,
+      storageMode: hydrated.storageMode,
+      saveStatus: hydrated.saveStatus,
+      existingAssignmentsCount: initialSchedule.assignments.length,
+      pinnedCount,
+      targetTxnsPerStaffHour: effectiveN,
+    },
+  });
+
+  // Step 0B: Summarize Demand Dataset if present
+  if (initialSchedule.demand) {
+    let totalTransactions = 0;
+    for (const day of DAYS_OF_WEEK) {
+      const dayRow = initialSchedule.demand.transactions[day];
+      if (!dayRow) continue;
+      for (const hour of OPERATING_HOURS) {
+        const val = dayRow[hour];
+        if (typeof val === 'number' && Number.isFinite(val)) {
+          totalTransactions += val;
+        }
+      }
+    }
+    const demandLabel = initialSchedule.demand.sourceFileName ?? 'Web Scheduler Demand';
+
+    collector.emit({
+      stageId: 'stage_0_gates',
+      stageLabel: 'Kiểm tra đầu vào',
+      kind: 'input_gate',
+      status: 'ok',
+      title: `Dữ liệu nhu cầu từ Web Scheduler: ${totalTransactions.toLocaleString('vi-VN')} giao dịch`,
+      narrative: `Sử dụng ma trận nhu cầu 7 ngày × 16 giờ (112 ô) từ "${demandLabel}" với tổng cộng ${totalTransactions.toLocaleString('vi-VN')} giao dịch trong tuần (Target N = ${effectiveN}).`,
+      metrics: [
+        { key: 'totalTransactions', label: 'Tổng giao dịch', value: totalTransactions, unit: 'gd' },
+      ],
+      debugPayload: {
+        sourceFileName: demandLabel,
+        importedAt: initialSchedule.demand.importedAt,
+        totalTransactions,
+        cellsParsed: 112,
+      },
+    });
+  }
+
+  // Step 1..6: Run real deterministic Auto-Scheduler with TraceCollector
+  const solverResult = runAutoSchedule(
+    {
+      demand: initialSchedule.demand,
+      staff: initialSchedule.staff,
+      shifts: initialSchedule.shifts,
+      existingAssignments: initialSchedule.assignments,
+      targetTxnsPerStaffHour: effectiveN,
+      idGenerator: makeDeterministicIdGen('auto'),
+    },
+    { observer: collector },
+  );
+
+  // Step 7: Atomic Persistence Commit or Rollback inside Sandbox
+  if (solverResult.status === 'SUCCESS') {
+    const updatedSchedule: Schedule = {
+      ...initialSchedule,
+      assignments: solverResult.assignments,
+      updatedAt: new Date().toISOString(),
+    };
+    const nextPersisted: PersistedAppState = {
+      ...hydrated.state,
+      schedules: [updatedSchedule],
+    };
+    const saveRes = saveState(nextPersisted, () => sandbox);
+
+    collector.emit({
+      stageId: 'stage_storage_commit',
+      stageLabel: 'Lưu kết quả (Atomic Save)',
+      kind: 'storage_io',
+      status: saveRes.ok ? 'ok' : 'error',
+      title: `Ghi nguyên tử ${solverResult.assignments.length} ca xuống LocalStorage (${saveRes.ok ? 'saved' : 'save_error'})`,
+      narrative: `Chỉ ghi dữ liệu nguồn (Domain Source of Truth) xuống "${PRIMARY_STORAGE_KEY}". Toàn bộ chỉ số dẫn xuất (Derived Metrics) sẽ được tính động lại qua pure selectors, không bao giờ lưu thừa.`,
+      metrics: [
+        { key: 'savedAssignments', label: 'Ca đã lưu', value: solverResult.assignments.length, unit: 'ca' },
+      ],
+      debugPayload: {
+        saveStatus: saveRes.ok ? 'saved' : 'save_error',
+        ...(saveRes.ok ? {} : { error: saveRes.error }),
+        persistedKeys: Object.keys(sandbox.snapshot()),
+        payloadBytes: sandbox.getItem(PRIMARY_STORAGE_KEY)?.length ?? 0,
+      },
+    });
+
+    return collector.build(`Web Roster: ${initialSchedule.name} (N=${effectiveN})`, 'SUCCESS');
+  }
+
+  collector.emit({
+    stageId: 'stage_storage_commit',
+    stageLabel: 'Bảo toàn trạng thái cũ',
+    kind: 'storage_io',
+    status: 'blocked',
+    title: 'Không ghi đè Storage — Giữ nguyên 100% lịch cũ (Atomic Guard)',
+    narrative: `Do thuật toán trả về "${solverResult.status}", hệ thống hủy bỏ toàn bộ trạng thái nháp. Schedule.assignments và dữ liệu trong "${PRIMARY_STORAGE_KEY}" giữ nguyên không thay đổi.`,
+    metrics: [],
+    debugPayload: {
+      solverStatus: solverResult.status,
+      storageUnchanged: true,
+    },
+  });
+
+  return collector.build(
+    `Web Roster: ${initialSchedule.name} (N=${effectiveN})`,
     solverResult.status === 'BLOCKED_PIN_CONFLICT' ? 'BLOCKED' : 'FAILED',
   );
 }
