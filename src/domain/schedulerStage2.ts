@@ -44,7 +44,16 @@ interface RebalanceMove {
 }
 
 function findBestRebalanceMove(state: SchedulerWorkingState, currentJ: number): RebalanceMove | null {
-  const { workingNew, eligibleStaff, assignedHours, maxHours, dayOccupied, sumU, sumU2 } = state;
+  const {
+    workingNew,
+    eligibleStaff,
+    assignedHours,
+    maxHours,
+    dayOccupied,
+    unavailableMask,
+    sumU,
+    sumU2,
+  } = state;
   const eligibleCount = eligibleStaff.length;
   const uLen = workingNew.length;
 
@@ -64,7 +73,7 @@ function findBestRebalanceMove(state: SchedulerWorkingState, currentJ: number): 
     uCurr[s] = u;
     uCurrSq[s] = u * u;
     const base = s * 7;
-    let mask = 0;
+    let mask = unavailableMask[s]!;
     for (let d = 0; d < 7; d++) {
       if (dayOccupied[base + d] !== 0) mask |= 1 << d;
     }

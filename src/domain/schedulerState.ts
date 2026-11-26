@@ -27,6 +27,10 @@ export interface SchedulerWorkingState {
   readonly maxHours: Float64Array;
   readonly assignedHours: Int32Array;
   readonly dayOccupied: Uint8Array;
+  /** 7-bit active-day bitmask per shift in `sortedShifts` (`bit d = 1` if active on day `d`). */
+  readonly shiftDayMask: Uint8Array;
+  /** Immutable 7-bit unavailable-day bitmask per staff in `eligibleStaff` (`bit d = 1` if unavailable). */
+  readonly unavailableMask: Uint8Array;
   sumU: number;
   sumU2: number;
   workingNew: WorkingAssignment[];

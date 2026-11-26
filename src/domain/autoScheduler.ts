@@ -7,6 +7,7 @@
 import { DAYS_OF_WEEK, MAX_SAFE_BIGINT, OPERATING_HOURS } from './constants';
 import { checkPinConflicts, validateCandidateAssignments } from './constraints';
 import { computeRequiredStaff } from './decimalMath';
+import { getShiftDayMask, getStaffUnavailableMask, isStaffEligible } from './hardRules';
 import { buildAutoScheduleDiagnostics } from './schedulerDiagnostics';
 import { runStage1Coverage } from './schedulerStage1';
 import { runStage2Rebalance } from './schedulerStage2';
@@ -42,7 +43,7 @@ function validateInputReadiness(
   if (input.shifts.length === 0) missingInputs.push('SHIFTS');
 
   const eligibleStaff = input.staff
-    .filter((s) => s.maxWeeklyHours > 0)
+    .filter(isStaffEligible)
     .slice()
     .sort((a, b) => compareStringsLex(a.id, b.id));
 
@@ -140,16 +141,23 @@ function initializeWorkingState(
   });
 
   const shiftMap = new Map(sortedShifts.map((sh) => [sh.id, sh]));
+  const shiftDayMask = new Uint8Array(sortedShifts.length);
+  for (let sIdx = 0; sIdx < sortedShifts.length; sIdx++) {
+    shiftDayMask[sIdx] = getShiftDayMask(sortedShifts[sIdx]!);
+  }
+
   const eligibleCount = eligibleStaff.length;
   const staffIdxById = new Map<string, number>();
   const maxHours = new Float64Array(eligibleCount);
   const assignedHours = new Int32Array(eligibleCount);
   const dayOccupied = new Uint8Array(eligibleCount * 7);
+  const unavailableMask = new Uint8Array(eligibleCount);
 
   for (let i = 0; i < eligibleCount; i++) {
     const s = eligibleStaff[i]!;
     staffIdxById.set(s.id, i);
     maxHours[i] = s.maxWeeklyHours;
+    unavailableMask[i] = getStaffUnavailableMask(s);
   }
 
   const pinnedAssignments: Assignment[] = [];
@@ -183,6 +191,8 @@ function initializeWorkingState(
     maxHours,
     assignedHours,
     dayOccupied,
+    shiftDayMask,
+    unavailableMask,
     sumU: 0,
     sumU2: 0,
     workingNew: [],

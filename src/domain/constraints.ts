@@ -4,11 +4,13 @@
  * `previewDeleteShift` (E-08), and `validateCandidateAssignments` (5 Atomic Commit invariants).
  */
 
-import { DAYS_OF_WEEK, OPERATING_HOURS } from './constants';
+import { DAY_LABELS, DAYS_OF_WEEK, OPERATING_HOURS } from './constants';
 import {
   checkMaxOneShiftPerDayRule,
   checkMaxWeeklyHoursRule,
   checkNoShiftOverlapRule,
+  checkShiftActiveOnDayRule,
+  checkStaffAvailableOnDayRule,
   computeStaffHoursGrid,
   computeUnionAssignedHours,
   formatShiftLabel,
@@ -47,6 +49,25 @@ export function previewDeleteShift(
 ): DeletePreview {
   const affectedAssignmentIds = assignments
     .filter((a) => a.shiftId === shiftId)
+    .map((a) => a.id);
+  return {
+    affectedAssignmentsCount: affectedAssignmentIds.length,
+    affectedAssignmentIds,
+  };
+}
+
+/**
+ * Previews cascade impact before disabling one or more active days on a ShiftTemplate.
+ * Counts all existing assignments (both regular and pinned) on days not present in `nextDaysOfWeek`.
+ */
+export function previewDisableShiftDays(
+  shiftId: string,
+  nextDaysOfWeek: readonly DayOfWeek[],
+  assignments: readonly Readonly<Assignment>[],
+): DeletePreview {
+  const activeSet = new Set<DayOfWeek>(nextDaysOfWeek);
+  const affectedAssignmentIds = assignments
+    .filter((a) => a.shiftId === shiftId && !activeSet.has(a.day))
     .map((a) => a.id);
   return {
     affectedAssignmentsCount: affectedAssignmentIds.length,
@@ -105,7 +126,19 @@ export function checkPinConflicts(
 
     for (const day of DAYS_OF_WEEK) {
       const dayPins = byDay.get(day);
-      if (!dayPins || checkMaxOneShiftPerDayRule(dayPins.length)) continue;
+      if (!dayPins) continue;
+
+      if (!checkStaffAvailableOnDayRule(staff, day)) {
+        conflicts.push({
+          staffId: staff.id,
+          staffName: staff.name,
+          type: 'UNAVAILABLE_DAY',
+          assignmentIds: dayPins.map((a) => a.id),
+          details: `${staff.name} has ${dayPins.length === 1 ? 'a pinned shift' : `${dayPins.length} pinned shifts`} on ${DAY_LABELS[day]}, which is marked as unavailable.`,
+        });
+      }
+
+      if (checkMaxOneShiftPerDayRule(dayPins.length)) continue;
 
       conflicts.push({
         staffId: staff.id,
@@ -191,6 +224,13 @@ export function evaluateStaffGuidance(
     );
 
     const reasons: AssignmentGuidanceReason[] = [];
+    if (!checkStaffAvailableOnDayRule(candidate, day)) {
+      reasons.push({
+        code: 'STAFF_UNAVAILABLE_ON_DAY',
+        message: `Marked unavailable on ${DAY_LABELS[day]}`,
+      });
+    }
+
     if (!checkMaxWeeklyHoursRule(hypotheticalAssignedHours, candidate.maxWeeklyHours)) {
       const excessHours = hypotheticalAssignedHours - candidate.maxWeeklyHours;
       reasons.push({
@@ -273,11 +313,25 @@ export function validateCandidateAssignments(
     }
     seenIds.add(a.id);
 
-    if (!staffMap.has(a.staffId)) {
+    const staff = staffMap.get(a.staffId);
+    if (!staff) {
       return { ok: false, message: `Unknown staffId "${a.staffId}" in candidate assignments.` };
     }
-    if (!shiftMap.has(a.shiftId)) {
+    const shift = shiftMap.get(a.shiftId);
+    if (!shift) {
       return { ok: false, message: `Unknown shiftId "${a.shiftId}" in candidate assignments.` };
+    }
+    if (!checkShiftActiveOnDayRule(shift, a.day)) {
+      return {
+        ok: false,
+        message: `Shift "${a.shiftId}" is inactive on ${DAY_LABELS[a.day]} (day ${a.day}).`,
+      };
+    }
+    if (!checkStaffAvailableOnDayRule(staff, a.day)) {
+      return {
+        ok: false,
+        message: `Staff "${a.staffId}" is unavailable on ${DAY_LABELS[a.day]} (day ${a.day}).`,
+      };
     }
 
     const tripleKey = `${a.day}|${a.shiftId}|${a.staffId}`;
