@@ -117,6 +117,14 @@ export function getStaffUnavailableMask(staff: Readonly<Staff>): number {
   return mask;
 }
 
+/** Counts available days (0-bits in the 7-bit `unavailableMask`) in O(1). */
+export function countAvailableDays7(unavailableMask: number): number {
+  let x = ~unavailableMask & 0x7f;
+  x = x - ((x >> 1) & 0x55);
+  x = (x & 0x33) + ((x >> 2) & 0x33);
+  return (x + (x >> 4)) & 0x0f;
+}
+
 /**
  * Unified eligibility predicate for Auto-schedule, Jain Fairness Index, utilization,
  * unused capacity, and `ELIGIBLE_STAFF` gate: requires `maxWeeklyHours > 0` and at least 1 available day.

@@ -18,6 +18,13 @@ export interface WorkingAssignment {
   staffIdx: number;
 }
 
+export interface RebalanceMove {
+  moveType: 'REASSIGN' | 'SWAP';
+  deltaJ: number;
+  a1Idx: number;
+  a2OrStaffIdx: number;
+}
+
 export interface SchedulerWorkingState {
   readonly eligibleStaff: readonly Readonly<Staff>[];
   readonly sortedShifts: readonly Readonly<ShiftTemplate>[];
